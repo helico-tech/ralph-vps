@@ -84,6 +84,22 @@ log_info "Created .claude/settings.json with broad permissions"
 mkdir -p "$LOG_DIR/archive"
 log_info "Created log directory: $LOG_DIR"
 
+# ── Commit & push scaffolding if needed ────────────────────────────────────
+
+cd "$PROJECT_DIR"
+if [[ -n "$(git status --porcelain)" ]]; then
+    git add -A
+    git commit -m "Add ralph scaffolding (PROMPT.md, BACKLOG.md, project.conf, .claude/settings.json)"
+    log_info "Committed scaffolding files."
+
+    if git push 2>/dev/null; then
+        log_info "Pushed scaffolding to remote."
+    else
+        log_warn "Could not push (remote may be empty). Run: ./bin/push-project.sh $NAME"
+    fi
+fi
+cd "$ROOT_DIR"
+
 # ── Done ────────────────────────────────────────────────────────────────────
 
 echo ""
