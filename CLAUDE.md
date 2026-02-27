@@ -37,7 +37,7 @@ To add a new setup step (e.g. Docker, Python tools, Rust):
 ## Key Design Decisions
 
 - No Docker — just SSH + tmux for simplicity
-- `claude auth login` for authentication (no API keys)
+- Run `claude` once interactively to authenticate (no API keys)
 - PROMPT.md re-read each iteration so tasks can be updated live
 - Logs stored separately from project directories
 - `--dangerously-skip-permissions` required for headless autonomous operation

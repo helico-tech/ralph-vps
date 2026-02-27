@@ -84,10 +84,11 @@ This installs:
 **Important**: Run this as your user, not root.
 
 ```bash
-claude auth login
+source ~/.bashrc
+claude
 ```
 
-Follow the interactive prompts to authenticate with your Claude account.
+Follow the on-screen instructions to log in. You only need to do this once.
 
 ## 7. Add SSH Key to GitHub
 

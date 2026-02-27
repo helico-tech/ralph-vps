@@ -106,7 +106,7 @@ Running loops are not affected. Restart them to pick up script changes:
 Edit the prompt file: `nano projects/<name>/PROMPT.md`
 
 **Claude authentication error**
-Run `claude auth login` (as your user, not root).
+Run `claude` and follow the on-screen instructions (as your user, not root).
 
 **tmux session already exists**
 Check with `./bin/status.sh`. Stop it with `./bin/stop-loop.sh <name>`.
