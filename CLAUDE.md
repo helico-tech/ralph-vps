@@ -10,6 +10,7 @@ This repo contains shell scripts for managing autonomous Claude Code loops on a 
 - `config/` — Global configuration (ralph.conf.default is checked in, ralph.conf is gitignored)
 - `setup-vps.sh` — Thin runner that sources phase scripts from `setup-vps/` in order
 - `setup-vps/` — Numbered phase scripts (e.g. `10-system-packages.sh`, `20-nodejs.sh`) executed during VPS bootstrap
+- `setup-project/` — Numbered phase scripts (e.g. `10-templates.sh`, `20-config.sh`) sourced by `bin/add-project.sh` during project scaffolding
 - `docs/` — Documentation
 
 ### Extending VPS Setup
@@ -19,6 +20,14 @@ To add a new setup step (e.g. Docker, Python tools, Rust):
 2. The runner auto-discovers all `setup-vps/[0-9][0-9]-*.sh` files
 3. Phase scripts are sourced (not subshelled) — they share `SCRIPT_DIR`, `ACTUAL_USER`, `ACTUAL_HOME`, and all `lib/common.sh` functions
 4. Every phase must be idempotent — check before acting so re-runs skip completed work
+
+### Extending Project Setup
+
+To add a new scaffolding step when adding a project:
+1. Create `setup-project/<NN>-<name>.sh` where `<NN>` determines execution order
+2. `bin/add-project.sh` auto-discovers all `setup-project/[0-9][0-9]-*.sh` files
+3. Phase scripts are sourced (not subshelled) — they share `NAME`, `PROJECT_DIR`, `LOG_DIR`, `TEMPLATES_DIR`, `ROOT_DIR`, and all `lib/common.sh` functions
+4. Each phase should be idempotent where possible
 
 ## Conventions
 

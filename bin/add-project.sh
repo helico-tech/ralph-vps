@@ -4,6 +4,10 @@
 #
 # Usage: add-project.sh <name> <github-url>
 #
+# Phases live in setup-project/*.sh and are sourced in numeric order.
+# To add a new step, create e.g. setup-project/45-foo.sh — it will be
+# picked up automatically on the next run.
+#
 
 set -euo pipefail
 
@@ -45,65 +49,17 @@ log_info "Cloning $REPO_URL ..."
 mkdir -p "$PROJECTS_DIR"
 git clone "$REPO_URL" "$PROJECT_DIR"
 
-# ── Scaffold ────────────────────────────────────────────────────────────────
+# ── Run phases in order ─────────────────────────────────────────────────────
 
-# Copy PROMPT.md template (only if repo doesn't already have one)
-if [[ ! -f "$PROJECT_DIR/PROMPT.md" ]]; then
-    cp "$TEMPLATES_DIR/PROMPT.md" "$PROJECT_DIR/PROMPT.md"
-    log_info "Created PROMPT.md from template — edit it with your task"
-else
-    log_info "PROMPT.md already exists in repo, keeping it"
-fi
-
-# Copy BACKLOG.md template (only if repo doesn't already have one)
-if [[ ! -f "$PROJECT_DIR/BACKLOG.md" ]]; then
-    cp "$TEMPLATES_DIR/BACKLOG.md" "$PROJECT_DIR/BACKLOG.md"
-    log_info "Created BACKLOG.md from template — fill in your epics and stories"
-else
-    log_info "BACKLOG.md already exists in repo, keeping it"
-fi
-
-# Copy PROGRESS.md template (only if repo doesn't already have one)
-if [[ ! -f "$PROJECT_DIR/PROGRESS.md" ]]; then
-    cp "$TEMPLATES_DIR/PROGRESS.md" "$PROJECT_DIR/PROGRESS.md"
-    log_info "Created PROGRESS.md from template"
-else
-    log_info "PROGRESS.md already exists in repo, keeping it"
-fi
-
-# Copy project.conf
-cp "$TEMPLATES_DIR/project.conf" "$PROJECT_DIR/project.conf"
-log_info "Created project.conf with defaults"
-
-# Set up .claude/settings.json
-mkdir -p "$PROJECT_DIR/.claude"
-cp "$TEMPLATES_DIR/claude-settings.json" "$PROJECT_DIR/.claude/settings.json"
-log_info "Created .claude/settings.json with broad permissions"
-
-# Install Playwright skills
-log_info "Installing Playwright skills..."
-(cd "$PROJECT_DIR" && playwright-cli install --skills) \
-    || log_warn "Playwright skills install failed (non-critical). Run: cd $PROJECT_DIR && playwright-cli install --skills"
-
-# Create log directory
-mkdir -p "$LOG_DIR/archive"
-log_info "Created log directory: $LOG_DIR"
-
-# ── Commit & push scaffolding if needed ────────────────────────────────────
-
-cd "$PROJECT_DIR"
-if [[ -n "$(git status --porcelain)" ]]; then
-    git add -A
-    git commit -m "Add ralph scaffolding (PROMPT.md, BACKLOG.md, project.conf, .claude/settings.json)"
-    log_info "Committed scaffolding files."
-
-    if git push 2>/dev/null; then
-        log_info "Pushed scaffolding to remote."
-    else
-        log_warn "Could not push (remote may be empty). Run: ./bin/push-project.sh $NAME"
+for phase in "$ROOT_DIR"/setup-project/[0-9][0-9]-*.sh; do
+    phase_name="$(basename "$phase")"
+    log_info "Running phase: $phase_name"
+    # shellcheck source=/dev/null
+    if ! source "$phase"; then
+        log_error "Phase failed: $phase_name"
+        exit 1
     fi
-fi
-cd "$ROOT_DIR"
+done
 
 # ── Done ────────────────────────────────────────────────────────────────────
 
