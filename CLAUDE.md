@@ -8,8 +8,17 @@ This repo contains shell scripts for managing autonomous Claude Code loops on a 
 - `lib/common.sh` — Shared functions (colors, logging, validation, config loading)
 - `templates/` — Scaffolding copied into new projects (PROMPT.md, project.conf, claude-settings.json)
 - `config/` — Global configuration (ralph.conf.default is checked in, ralph.conf is gitignored)
-- `setup-vps.sh` — One-time VPS bootstrap (root)
+- `setup-vps.sh` — Thin runner that sources phase scripts from `setup-vps/` in order
+- `setup-vps/` — Numbered phase scripts (e.g. `10-system-packages.sh`, `20-nodejs.sh`) executed during VPS bootstrap
 - `docs/` — Documentation
+
+### Extending VPS Setup
+
+To add a new setup step (e.g. Docker, Python tools, Rust):
+1. Create `setup-vps/<NN>-<name>.sh` where `<NN>` determines execution order
+2. The runner auto-discovers all `setup-vps/[0-9][0-9]-*.sh` files
+3. Phase scripts are sourced (not subshelled) — they share `SCRIPT_DIR`, `ACTUAL_USER`, `ACTUAL_HOME`, and all `lib/common.sh` functions
+4. Every phase must be idempotent — check before acting so re-runs skip completed work
 
 ## Conventions
 
