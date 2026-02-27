@@ -36,6 +36,12 @@ if [[ ! -f "$PROJECT_DIR/PROMPT.md" ]]; then
     exit 1
 fi
 
+if [[ ! -f "$PROJECT_DIR/BACKLOG.md" ]]; then
+    log_warn "BACKLOG.md not found in $PROJECT_DIR"
+    log_warn "The loop will run but has no backlog to work from."
+    log_warn "Create one with: cp templates/BACKLOG.md $PROJECT_DIR/BACKLOG.md"
+fi
+
 if is_loop_running "$NAME"; then
     log_error "Loop is already running for '$NAME' (session: $SESSION)"
     log_error "Use './bin/attach.sh $NAME' to view it"

@@ -55,6 +55,22 @@ else
     log_info "PROMPT.md already exists in repo, keeping it"
 fi
 
+# Copy BACKLOG.md template (only if repo doesn't already have one)
+if [[ ! -f "$PROJECT_DIR/BACKLOG.md" ]]; then
+    cp "$TEMPLATES_DIR/BACKLOG.md" "$PROJECT_DIR/BACKLOG.md"
+    log_info "Created BACKLOG.md from template — fill in your epics and stories"
+else
+    log_info "BACKLOG.md already exists in repo, keeping it"
+fi
+
+# Copy PROGRESS.md template (only if repo doesn't already have one)
+if [[ ! -f "$PROJECT_DIR/PROGRESS.md" ]]; then
+    cp "$TEMPLATES_DIR/PROGRESS.md" "$PROJECT_DIR/PROGRESS.md"
+    log_info "Created PROGRESS.md from template"
+else
+    log_info "PROGRESS.md already exists in repo, keeping it"
+fi
+
 # Copy project.conf
 cp "$TEMPLATES_DIR/project.conf" "$PROJECT_DIR/project.conf"
 log_info "Created project.conf with defaults"
@@ -74,6 +90,7 @@ echo ""
 log_info "Project '$NAME' added successfully!"
 echo ""
 echo "Next steps:"
-echo "  1. Edit the task:    nano $PROJECT_DIR/PROMPT.md"
-echo "  2. Adjust config:    nano $PROJECT_DIR/project.conf"
-echo "  3. Start the loop:   ./bin/start-loop.sh $NAME"
+echo "  1. Edit the backlog: nano $PROJECT_DIR/BACKLOG.md"
+echo "  2. Edit the prompt:  nano $PROJECT_DIR/PROMPT.md"
+echo "  3. Adjust config:    nano $PROJECT_DIR/project.conf"
+echo "  4. Start the loop:   ./bin/start-loop.sh $NAME"
