@@ -1,0 +1,14 @@
+# Runtime directories
+projects/
+logs/
+
+# Local config (generated from ralph.conf.default)
+config/ralph.conf
+
+# Environment
+.env
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

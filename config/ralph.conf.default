@@ -1,0 +1,20 @@
+# Global ralph configuration defaults
+# Copy to config/ralph.conf to customize. Project-level project.conf overrides these.
+
+# Maximum number of turns (tool calls) per Claude session
+MAX_TURNS=50
+
+# Maximum number of loop iterations (0 = unlimited)
+MAX_ITERATIONS=0
+
+# Seconds to pause between loop iterations
+PAUSE_BETWEEN_LOOPS=30
+
+# Restart policy: "on-exit" (always), "on-success" (exit 0 only), "never" (one-shot)
+RESTART_POLICY="on-exit"
+
+# Model override (empty = use Claude default)
+MODEL=""
+
+# Extra flags passed to the claude command
+CLAUDE_EXTRA_FLAGS=""
