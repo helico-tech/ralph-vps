@@ -83,7 +83,7 @@ while true; do
     log_section "Iteration $ITERATION — $(date '+%Y-%m-%d %H:%M:%S')"
 
     # Build claude command
-    CLAUDE_CMD=(claude -p --dangerously-skip-permissions --output-format text)
+    CLAUDE_CMD=(claude -p --output-format text)
 
     if [[ "$MAX_TURNS" -gt 0 ]]; then
         CLAUDE_CMD+=(--max-turns "$MAX_TURNS")

@@ -40,4 +40,4 @@ To add a new setup step (e.g. Docker, Python tools, Rust):
 - Run `claude` once interactively to authenticate (no API keys)
 - PROMPT.md re-read each iteration so tasks can be updated live
 - Logs stored separately from project directories
-- `--dangerously-skip-permissions` required for headless autonomous operation
+- Permissions managed via `templates/claude-settings.json` (copied into each project)
