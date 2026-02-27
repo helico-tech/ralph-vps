@@ -80,6 +80,11 @@ mkdir -p "$PROJECT_DIR/.claude"
 cp "$TEMPLATES_DIR/claude-settings.json" "$PROJECT_DIR/.claude/settings.json"
 log_info "Created .claude/settings.json with broad permissions"
 
+# Install Playwright skills
+log_info "Installing Playwright skills..."
+(cd "$PROJECT_DIR" && playwright-cli install --skills) \
+    || log_warn "Playwright skills install failed (non-critical). Run: cd $PROJECT_DIR && playwright-cli install --skills"
+
 # Create log directory
 mkdir -p "$LOG_DIR/archive"
 log_info "Created log directory: $LOG_DIR"
