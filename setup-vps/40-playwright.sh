@@ -14,3 +14,9 @@ else
         npm install -g @playwright/cli@latest
     " || log_warn "Playwright CLI install failed (non-critical). You can install it later."
 fi
+
+log_info "Installing Chrome browser for Playwright..."
+sudo -u "$ACTUAL_USER" bash -c "
+    source '$NVM_DIR/nvm.sh'
+    npx playwright install chrome
+" || log_warn "Chrome install failed (non-critical). You can install it later."
