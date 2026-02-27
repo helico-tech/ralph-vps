@@ -62,7 +62,7 @@ ssh ralph@<server-ip>
 
 ```bash
 cd ~
-git clone https://github.com/your-org/ralph-vps.git
+git clone https://github.com/helico-tech/ralph-vps.git
 cd ralph-vps
 ```
 
