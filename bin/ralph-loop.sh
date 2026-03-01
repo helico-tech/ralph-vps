@@ -99,7 +99,7 @@ while true; do
     ITER_START="$(date +%s)"
 
     # Build claude command
-    CLAUDE_CMD=(claude -p --output-format stream-json)
+    CLAUDE_CMD=(claude -p --verbose --output-format stream-json)
 
     if [[ "$MAX_TURNS" -gt 0 ]]; then
         CLAUDE_CMD+=(--max-turns "$MAX_TURNS")
@@ -121,7 +121,7 @@ while true; do
     # With set -o pipefail, the pipe returns Claude's exit code if it fails
     EXIT_CODE=0
     if [[ -f "$COLLECTOR" ]]; then
-        (cd "$PROJECT_DIR" && RALPH_ITERATION="$ITERATION" "${CLAUDE_CMD[@]}" | node "$COLLECTOR") || EXIT_CODE=$?
+        (cd "$PROJECT_DIR" && export RALPH_ITERATION="$ITERATION" && "${CLAUDE_CMD[@]}" | node "$COLLECTOR") || EXIT_CODE=$?
     else
         (cd "$PROJECT_DIR" && "${CLAUDE_CMD[@]}") || EXIT_CODE=$?
     fi
