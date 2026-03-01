@@ -115,6 +115,16 @@ load_config() {
     # shellcheck disable=SC2034
     CLAUDE_EXTRA_FLAGS=""
 
+    # Circuit breaker defaults
+    # shellcheck disable=SC2034
+    MAX_STALL_ITERATIONS=3
+    # shellcheck disable=SC2034
+    MAX_CONSECUTIVE_ERRORS=3
+    # shellcheck disable=SC2034
+    MIN_ITERATION_DURATION=30
+    # shellcheck disable=SC2034
+    BACKLOG_COMPLETION_STOP="true"
+
     # Load global config
     if [[ -f "$GLOBAL_CONF" ]]; then
         # shellcheck source=/dev/null
@@ -129,4 +139,149 @@ load_config() {
         # shellcheck source=/dev/null
         source "$project_conf"
     fi
+}
+
+# ── State tracking ──────────────────────────────────────────────────────────
+
+# Create .ralph/ state directory inside a project, echo the path
+init_state_dir() {
+    local project_dir="$1"
+    local state_dir="$project_dir/.ralph"
+    mkdir -p "$state_dir"
+    echo "$state_dir"
+}
+
+# Snapshot git hash + backlog hash before an iteration
+record_pre_state() {
+    local project_dir="$1"
+    local state_dir="$2"
+
+    # Git HEAD hash
+    local git_hash
+    git_hash="$(cd "$project_dir" && git rev-parse HEAD 2>/dev/null || echo "none")"
+    echo "$git_hash" > "$state_dir/pre_git_hash"
+
+    # BACKLOG.md hash
+    if [[ -f "$project_dir/BACKLOG.md" ]]; then
+        md5sum "$project_dir/BACKLOG.md" | cut -d' ' -f1 > "$state_dir/pre_backlog_hash"
+    else
+        echo "none" > "$state_dir/pre_backlog_hash"
+    fi
+
+    # Active epic file hash (find [~] epic slug from BACKLOG.md)
+    local active_slug
+    active_slug="$(grep -oP '^\- \[~\] \K[^ ]+' "$project_dir/BACKLOG.md" 2>/dev/null | head -1 || true)"
+    if [[ -n "$active_slug" && -f "$project_dir/epics/$active_slug.md" ]]; then
+        md5sum "$project_dir/epics/$active_slug.md" | cut -d' ' -f1 > "$state_dir/pre_epic_hash"
+        echo "$active_slug" > "$state_dir/pre_epic_slug"
+    else
+        echo "none" > "$state_dir/pre_epic_hash"
+        echo "" > "$state_dir/pre_epic_slug"
+    fi
+}
+
+# Compare pre/post state to detect progress. Echoes "true" or "false".
+detect_progress() {
+    local project_dir="$1"
+    local state_dir="$2"
+
+    # Check if git HEAD changed (new commits)
+    local pre_hash post_hash
+    pre_hash="$(cat "$state_dir/pre_git_hash" 2>/dev/null || echo "none")"
+    post_hash="$(cd "$project_dir" && git rev-parse HEAD 2>/dev/null || echo "none")"
+    if [[ "$pre_hash" != "$post_hash" ]]; then
+        echo "true"
+        return
+    fi
+
+    # Check for uncommitted changes
+    if (cd "$project_dir" && git diff --stat --quiet 2>/dev/null); then
+        : # no uncommitted changes
+    else
+        echo "true"
+        return
+    fi
+
+    # Check if BACKLOG.md changed
+    local pre_backlog_hash post_backlog_hash
+    pre_backlog_hash="$(cat "$state_dir/pre_backlog_hash" 2>/dev/null || echo "none")"
+    if [[ -f "$project_dir/BACKLOG.md" ]]; then
+        post_backlog_hash="$(md5sum "$project_dir/BACKLOG.md" | cut -d' ' -f1)"
+    else
+        post_backlog_hash="none"
+    fi
+    if [[ "$pre_backlog_hash" != "$post_backlog_hash" ]]; then
+        echo "true"
+        return
+    fi
+
+    # Check if active epic file changed
+    local pre_epic_hash post_epic_hash active_slug
+    pre_epic_hash="$(cat "$state_dir/pre_epic_hash" 2>/dev/null || echo "none")"
+    active_slug="$(cat "$state_dir/pre_epic_slug" 2>/dev/null || true)"
+    if [[ -n "$active_slug" && -f "$project_dir/epics/$active_slug.md" ]]; then
+        post_epic_hash="$(md5sum "$project_dir/epics/$active_slug.md" | cut -d' ' -f1)"
+    else
+        post_epic_hash="none"
+    fi
+    if [[ "$pre_epic_hash" != "$post_epic_hash" ]]; then
+        echo "true"
+        return
+    fi
+
+    echo "false"
+}
+
+# Check if all epics in BACKLOG.md are [x] done. Returns 0 if complete, 1 if work remains.
+check_backlog_complete() {
+    local backlog_file="$1"
+
+    if [[ ! -f "$backlog_file" ]]; then
+        return 1
+    fi
+
+    # If any epic is [ ] todo or [~] in-progress, work remains
+    if grep -qP '^\- \[[ ~]\]' "$backlog_file" 2>/dev/null; then
+        return 1
+    fi
+
+    # Check there's at least one [x] epic (not an empty backlog)
+    if grep -qP '^\- \[x\]' "$backlog_file" 2>/dev/null; then
+        return 0
+    fi
+
+    # No epics at all
+    return 1
+}
+
+# Write stop reason and timestamp
+save_stop_reason() {
+    local state_dir="$1"
+    local reason="$2"
+    echo "$reason" > "$state_dir/stop-reason"
+    date -u '+%Y-%m-%dT%H:%M:%SZ' > "$state_dir/stop-timestamp"
+}
+
+# Write iteration state file (bash-sourceable)
+save_iteration_state() {
+    local state_dir="$1"
+    local iteration="$2"
+    local exit_code="$3"
+    local duration="$4"
+    local no_progress_count="$5"
+    local error_count="$6"
+    local project_dir="$7"
+
+    local git_hash
+    git_hash="$(cd "$project_dir" && git rev-parse HEAD 2>/dev/null || echo "none")"
+
+    cat > "$state_dir/state" <<EOF
+LAST_ITERATION=$iteration
+LAST_EXIT_CODE=$exit_code
+LAST_ITERATION_DURATION=$duration
+CONSECUTIVE_NO_PROGRESS=$no_progress_count
+CONSECUTIVE_ERRORS=$error_count
+LAST_GIT_HASH="$git_hash"
+LAST_TIMESTAMP="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+EOF
 }

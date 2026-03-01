@@ -41,20 +41,28 @@ if [[ ! -d "$PROJECTS_DIR" ]] || [[ -z "$(ls -A "$PROJECTS_DIR" 2>/dev/null)" ]]
     exit 0
 fi
 
-printf "${BOLD}%-20s %-10s %-12s %s${NC}\n" "PROJECT" "STATUS" "LOG SIZE" "LAST LOG LINE"
-printf "%-20s %-10s %-12s %s\n" "-------" "------" "--------" "-------------"
+printf "${BOLD}%-20s %-10s %-20s %-12s %s${NC}\n" "PROJECT" "STATUS" "STOP REASON" "LOG SIZE" "LAST LOG LINE"
+printf "%-20s %-10s %-20s %-12s %s\n" "-------" "------" "-----------" "--------" "-------------"
 
 for project_dir in "$PROJECTS_DIR"/*/; do
     [[ -d "$project_dir" ]] || continue
 
     name="$(basename "$project_dir")"
     log_file="$LOGS_DIR/$name/loop.log"
+    state_dir="$project_dir/.ralph"
 
     # Status
     if is_loop_running "$name"; then
         status="${GREEN}RUNNING${NC}"
     else
         status="${RED}STOPPED${NC}"
+    fi
+
+    # Stop reason
+    if [[ -f "$state_dir/stop-reason" ]]; then
+        stop_reason="$(cat "$state_dir/stop-reason" 2>/dev/null || echo "-")"
+    else
+        stop_reason="-"
     fi
 
     # Log size
@@ -74,5 +82,5 @@ for project_dir in "$PROJECTS_DIR"/*/; do
         last_line="-"
     fi
 
-    printf "%-20s %-10b %-12s %s\n" "$name" "$status" "$log_size" "$last_line"
+    printf "%-20s %-10b %-20s %-12s %s\n" "$name" "$status" "$stop_reason" "$log_size" "$last_line"
 done

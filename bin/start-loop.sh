@@ -42,6 +42,11 @@ if [[ ! -f "$PROJECT_DIR/BACKLOG.md" ]]; then
     log_warn "Create one with: cp templates/BACKLOG.md $PROJECT_DIR/BACKLOG.md"
 fi
 
+if [[ ! -d "$PROJECT_DIR/epics" ]]; then
+    log_warn "epics/ directory not found in $PROJECT_DIR"
+    log_warn "Create epic files in epics/ to match your BACKLOG.md entries."
+fi
+
 if is_loop_running "$NAME"; then
     log_error "Loop is already running for '$NAME' (session: $SESSION)"
     log_error "Use './bin/attach.sh $NAME' to view it"

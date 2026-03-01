@@ -6,7 +6,7 @@ log_section "Commit & push"
 cd "$PROJECT_DIR" || return 1
 if [[ -n "$(git status --porcelain)" ]]; then
     git add -A
-    git commit -m "Add ralph scaffolding (PROMPT.md, BACKLOG.md, project.conf, .claude/settings.json)"
+    git commit -m "Add ralph scaffolding (PROMPT.md, BACKLOG.md, epics/, project.conf, .claude/settings.json)"
     log_info "Committed scaffolding files."
 
     if git push 2>/dev/null; then
