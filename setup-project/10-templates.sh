@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# 10-templates.sh - Copy PROMPT.md, BACKLOG.md, PROGRESS.md, epics/ (if missing)
+# 10-templates.sh - Copy PROMPT.md, BACKLOG.md, epics/ (if missing)
 
 log_section "Templates"
 
@@ -26,12 +26,4 @@ if [[ ! -d "$PROJECT_DIR/epics" ]]; then
     log_info "Created epics/ directory with example epic"
 else
     log_info "epics/ directory already exists, keeping it"
-fi
-
-# Copy PROGRESS.md template (only if repo doesn't already have one)
-if [[ ! -f "$PROJECT_DIR/PROGRESS.md" ]]; then
-    cp "$TEMPLATES_DIR/PROGRESS.md" "$PROJECT_DIR/PROGRESS.md"
-    log_info "Created PROGRESS.md from template"
-else
-    log_info "PROGRESS.md already exists in repo, keeping it"
 fi

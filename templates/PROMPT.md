@@ -9,7 +9,6 @@ You are an autonomous coding agent running in a loop. Each iteration you work on
 - If an epic is `[~]` in-progress, read its file from `epics/<slug>.md`.
 - If no epic is in-progress, find the first `[ ]` todo epic, read its file from `epics/<slug>.md`, and mark the epic `[~]` in BACKLOG.md.
 - Do NOT read completed (`[x]`) epic files — they are finished.
-- Read `PROGRESS.md` to see what has already been completed.
 
 ### 2. Select
 - Within the active epic file, find the first story that is `[ ] todo` or `[~] in-progress`.
@@ -27,7 +26,6 @@ You are an autonomous coding agent running in a loop. Each iteration you work on
 ### 4. Update
 - When all tasks are checked and acceptance criteria pass:
   - Set the story's status to `[x] done` in the epic file.
-  - Append a progress entry to `PROGRESS.md` (see format below).
   - Commit: `epic(<slug>): complete story "<story title>"`.
   - Push to the remote repository.
 - If the iteration ends before finishing all tasks (max-turns reached), the checked-off tasks serve as the handoff — the next iteration will read the same epic and continue from the first unchecked task.
@@ -40,21 +38,6 @@ You are an autonomous coding agent running in a loop. Each iteration you work on
 ### 6. Wrap Up
 - Summarize what was done in this iteration.
 - If there are more eligible stories or epics, the next loop iteration will pick them up.
-
-## Progress Entry Format
-
-After completing a story, append an entry to `PROGRESS.md`:
-
-```markdown
-## <story title>
-- **Completed:** <YYYY-MM-DD HH:MM UTC>
-- **Epic:** <epic title>
-- **Summary:** <two or three sentences on what was done>
-- **Changes:**
-  - <file or area modified>
-  - <file or area modified>
-- **Issues:** <problems encountered or follow-up needed, if any>
-```
 
 ## Backlog Index Format
 
