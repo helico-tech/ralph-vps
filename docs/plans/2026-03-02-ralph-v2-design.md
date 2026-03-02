@@ -1,7 +1,7 @@
 # Ralph v2 — Unified Contextual CLI
 
 **Date:** 2026-03-02
-**Status:** Draft
+**Status:** Draft (post-review)
 **Author:** Brainstorming session
 
 ## Problem Statement
@@ -28,7 +28,18 @@ A unified CLI built with **Bun + TypeScript** that behaves contextually based on
 | **Node** | `.ralph/node.json` | The VPS. Hosts projects, runs loops in tmux, produces telemetry. |
 | **Project** | `.ralph/project.json` | Inside a project dir on a Node. Contains task queue, type definitions, iteration logs. |
 
-**Environment detection:** The CLI walks up the directory tree looking for `.ralph/{client,node,project}.json` — identical to how `git` finds `.git/`.
+**Environment detection:** The CLI walks up the directory tree looking for `.ralph/{client,node,project}.json` — identical to how `git` finds `.git/`. **Precedence: closest match wins.** Inside a project on a node, `.ralph/project.json` is found first → project context. Use `ralph --env node <command>` to override.
+
+### Two Directory Convention
+
+Project data is split into two directories to cleanly separate tracked and untracked concerns:
+
+| Directory | Git tracked? | Contents |
+|---|---|---|
+| **`.ralph/`** | Yes | `tasks/`, `types/`, `migrations/`, `project.json` — anything that's data or configuration |
+| **`.ralph-local/`** | No (gitignored) | `logs/`, `state.json`, `sync-manifest.json` — runtime state, output, caches |
+
+**Rule:** If it's data (tasks, config, definitions) → `.ralph/`. If it's runtime (state, output, caches) → `.ralph-local/`. Only `.ralph-local/` goes in `.gitignore`.
 
 ### Data Flow
 
@@ -41,11 +52,17 @@ Client (your laptop)
   └── ralph remote vps1 loop start myproject (SSH control plane)
         │
         Node (VPS)
-          └── Project (.ralph/project.json)
-                ├── .ralph/tasks/          ← flat task queue
-                ├── .ralph/types/          ← convention-based type definitions
-                ├── .ralph/logs/           ← structured JSON logs per iteration
-                └── .ralph/state.json      ← loop state
+          └── Project
+                ├── .ralph/                ← git-tracked
+                │   ├── project.json       ← project config
+                │   ├── tasks/             ← flat task queue
+                │   ├── types/             ← convention-based type definitions
+                │   └── migrations/        ← schema migration scripts
+                │
+                └── .ralph-local/          ← gitignored
+                    ├── state.json         ← loop state
+                    ├── logs/              ← structured JSON logs per iteration
+                    └── sync-manifest.json ← sync tracking
 ```
 
 **Key principle:** Git is the data transport. Tasks live in the repo. The Client pushes task changes to the remote, the Node pulls and executes. SSH is for commands (start/stop/status), Git is for data (tasks/state).
@@ -57,28 +74,32 @@ The codebase follows hexagonal architecture: domain logic is pure, all I/O goes 
 ```
 src/
   domain/                ← pure logic, no I/O
-    task.ts              ← Task type, pickNext(), validation
+    task.ts              ← Task type, validation
     loop.ts              ← loop state machine, iteration logic
-    types.ts             ← type resolution, prompt compilation
+    types.ts             ← type resolution
     migration.ts         ← schema migration logic
 
   ports/                 ← interfaces (SPIs)
     task-repository.ts   ← TaskRepository
+    task-selector.ts     ← TaskSelector (pick next task)
     config-provider.ts   ← ConfigProvider
     log-store.ts         ← LogStore
     process-runner.ts    ← ProcessRunner (claude CLI execution)
     remote-executor.ts   ← RemoteExecutor (SSH)
     prompt-compiler.ts   ← PromptCompiler
     progress-detector.ts ← ProgressDetector
+    git-synchronizer.ts  ← GitSynchronizer (pull/commit/push cycle)
 
   adapters/              ← implementations
     fs-task-repository.ts
+    priority-task-selector.ts
     fs-config-provider.ts
     json-log-store.ts
     claude-process-runner.ts
     ssh-remote-executor.ts
     template-prompt-compiler.ts
     git-progress-detector.ts
+    shell-git-synchronizer.ts
 
   cli/                   ← command definitions, wiring
     commands/
@@ -105,10 +126,9 @@ ralph migrate                       # Run pending schema migrations
 ```
 ralph task create --type <TYPE>     # Assisted task creation (spawns Claude skill)
 ralph task add <title> [opts]       # Quick task creation from template
-ralph task list [--status S] [--type T]
+ralph task list [--status S] [--type T] [--parent P]
 ralph task next                     # Show what the loop would pick next
 ralph task edit <id>                # Open task in $EDITOR
-ralph task review <id>              # Mark task for review
 ralph log [--iteration N] [--json]  # View structured logs
 ralph log stats                     # Token/cost/tool usage summary
 ralph log errors                    # All errors, sorted by frequency
@@ -144,20 +164,21 @@ Commands that don't apply to the current environment show a helpful error:
 
 ### Storage
 
-All tasks live in `.ralph/tasks/` as Markdown files with YAML frontmatter.
+All tasks live in `.ralph/tasks/` as Markdown files with YAML frontmatter. This directory is git-tracked — tasks are versioned and transported via git.
 
-**Naming:** `<id>.md` where `id` is a slug derived from title + timestamp (e.g., `fix-auth-bug-20260302.md`).
+**Naming:** `<slug>-<YYYYMMDDTHHMMSS>.md` — slug derived from title, timestamp to the second for uniqueness (e.g., `fix-auth-bug-20260302T100532.md`).
 
 ### Frontmatter Schema (base fields)
 
 ```yaml
 ---
-id: fix-auth-bug-20260302
+id: fix-auth-bug-20260302T100532
 type: bug-fix                   # maps to .ralph/types/<type>/
-status: pending                 # pending | in_progress | review_pending | completed | cancelled
+status: pending                 # pending | in_progress | completed | cancelled
 priority: 1                    # 1=critical, 2=high, 3=normal, 4=low
-parent: epic-auth-overhaul     # optional: logical grouping
+parent: auth-overhaul           # optional: grouping label (not a task reference)
 depends_on: []                 # IDs of tasks that must complete first
+reviews: ""                    # optional: ID of task this reviews (for review tasks)
 order: 10                      # tie-breaker within same priority
 created: 2026-03-02T10:00:00Z
 updated: 2026-03-02T10:00:00Z
@@ -165,18 +186,28 @@ schema_version: 1              # for migrations
 ---
 ```
 
-### Task Hierarchy
+### Task Grouping
 
-**Flat queue with parent references.** All tasks live in one directory. Epics are just tasks whose children share a `parent` ref. No nested directories, no rigid hierarchy.
+**Parents are labels, not tasks.** The `parent` field is a free-form string used for logical grouping and filtering. There is no parent task file. No cascading completion. No hierarchy management.
 
-- An "epic" is a task with children that reference it via `parent`
-- A "story" is a task within an epic
-- Grouping is logical (via `parent`), not physical (via directories)
+- `ralph task list --parent auth-overhaul` shows all tasks in that group
+- "Is the epic done?" = "are all tasks with `parent: auth-overhaul` completed?" — that's a query, not state
+- Groups can be created implicitly by assigning the same `parent` value to multiple tasks
 
-### Priority & "Pick Next" Algorithm
+### Task Selection (Interface)
+
+Task selection is behind a `TaskSelector` interface in `ports/`:
 
 ```typescript
-function pickNext(tasks: Task[]): Task | null {
+interface TaskSelector {
+  selectNext(tasks: Task[]): Task | null;
+}
+```
+
+**Default implementation (`PriorityTaskSelector`):**
+
+```typescript
+function selectNext(tasks: Task[]): Task | null {
   return tasks
     .filter(t => t.status === 'pending')
     .filter(t => t.depends_on.every(dep => isCompleted(dep)))
@@ -188,7 +219,7 @@ function pickNext(tasks: Task[]): Task | null {
 }
 ```
 
-Deterministic. Same state = same pick. A review session creating bug-fixes with `priority: 1` naturally pushes them to the top of the queue.
+Deterministic. Same state = same pick. Swappable — alternative selectors can implement different strategies without touching the loop engine.
 
 ### Task Types (Convention-Based)
 
@@ -200,8 +231,6 @@ Each task type is a directory under `.ralph/types/`:
     prompt.md       ← prompt enrichment template for loop execution
     template.md     ← scaffolding template for task creation
     schema.json     ← frontmatter validation schema (optional)
-    skills/         ← skills injected during this type's execution
-    agents/         ← agents injected during this type's execution
   bug-fix/
     prompt.md
     template.md
@@ -209,16 +238,33 @@ Each task type is a directory under `.ralph/types/`:
   research/
     ...
   review/
+    prompt.md       ← review-specific prompt (reads referenced task's changes)
+    template.md
     ...
 ```
 
 New task types = new directories. No config file to update. The filesystem is the registry.
 
+Skills and agents referenced by type prompt templates are pre-deployed via `ralph sync` into `.claude/skills/` and `.claude/agents/`. They are NOT injected at runtime — they're already present in the project filesystem before the loop starts. Claude Code discovers them naturally.
+
+### Review Flow
+
+Reviews are regular tasks, not a special status. The flow:
+
+1. Worker completes a task → marks it `completed`
+2. Loop engine's post-completion hook auto-creates a new task: `type: review`, `reviews: <completed-task-id>`, `priority: 1`
+3. `TaskSelector.selectNext()` sees a pending review task with high priority → picks it
+4. The `review` type's prompt template knows to examine the referenced task's git changes
+5. Reviewer either confirms (marks review task `completed`) or creates new bug-fix tasks with `priority: 1`
+6. Bug fixes naturally jump the queue on the next iteration
+
+No special review infrastructure. No status gymnastics. A review is born, lives, and dies like any other task.
+
 ### Task Creation (Two Modes)
 
 1. **Template mode (quick):** `ralph task add --type bug-fix` opens `$EDITOR` with a pre-filled template from `types/bug-fix/template.md`. Validates frontmatter against schema on save.
 
-2. **Assisted mode (rich):** `ralph task create --type feature-dev` invokes a Claude Code skill that interviews you, suggests acceptance criteria, identifies dependencies, and writes the task file. Works both inside an existing Claude session (as a skill) and from the terminal (spawns a new session).
+2. **Assisted mode (rich):** `ralph task create --type feature-dev` invokes a Claude Code skill that interviews you, suggests acceptance criteria, identifies dependencies, and writes the task file. Works both inside an existing Claude session (as a `/ralph-task-create` skill) and from the terminal (spawns a new session).
 
 ### Schema Migrations
 
@@ -235,6 +281,8 @@ The `schema_version` field in frontmatter tracks the data version. Migrations li
 - Reads, transforms, writes each affected task file
 - Bumps `schema_version` in frontmatter
 
+**Guards:** `ralph migrate` requires a clean git state (no uncommitted changes). After running, it auto-commits all migrated files with message `"ralph: migrate tasks to schema vN"` and pushes. If push fails, it reports the error for manual resolution. Migrations can be run from Client or Node — whichever has clean state.
+
 Migrations ship with the CLI, so updating Ralph tells you if migrations are pending.
 
 ---
@@ -244,28 +292,29 @@ Migrations ship with the CLI, so updating Ralph tells you if migrations are pend
 ### State Machine
 
 ```
-IDLE → STARTING → RUNNING → COMPLETING → [REVIEWING] → IDLE
-                     ↓                         ↓
-                  ERRORED ←──────────────── ERRORED
-                     ↓
-                  STOPPED
+IDLE → PULLING → SELECTING → COMPILING → EXECUTING → COLLECTING → PUSHING → IDLE
+                                            ↓
+                                         ERRORED → STOPPED
 ```
 
 ### One Iteration
 
-1. **Pick task:** `TaskRepository.pickNext()` — deterministic selection
-2. **Resolve type:** Load type definition from `.ralph/types/<type>/`
-3. **Compile prompt:** `PromptCompiler.compile(task, type, context)` → merges task body + type prompt template + skills/agents + loop context
-4. **Record pre-state:** Git hash, task hash (via `ProgressDetector`)
-5. **Execute:** `ProcessRunner.run()` — spawns `claude -p --output-format stream-json` with compiled prompt
-6. **Collect:** Pipe output through collector, write structured JSON log via `LogStore`
-7. **Post-check:** Progress detection, error tracking via `ProgressDetector`
-8. **Update task:** Status transitions based on outcome and type configuration
-9. **Apply restart policy:** Continue, pause, or stop
+1. **Sync:** `GitSynchronizer.pull()` — pull latest from remote (rebase)
+2. **Pick task:** `TaskSelector.selectNext()` — deterministic selection via interface
+3. **Resolve type:** Load type definition from `.ralph/types/<type>/`
+4. **Compile prompt:** `PromptCompiler.compile(task, type, context)` → merges task body + type prompt template + loop context
+5. **Record pre-state:** Git hash, task hash (via `ProgressDetector`)
+6. **Execute:** `ProcessRunner.run()` — spawns `claude -p --output-format stream-json` with compiled prompt
+7. **Collect:** Pipe output through collector, write structured JSON log via `LogStore`
+8. **Post-check:** Progress detection, error tracking via `ProgressDetector`
+9. **Update task:** Status transitions based on outcome and type configuration
+10. **Create review task:** If type requires review, auto-create a review task referencing the completed task
+11. **Sync:** `GitSynchronizer.commitAndPush()` — commit changes and push to remote
+12. **Apply restart policy:** Continue, pause, or stop
 
 ### Prompt Compilation
 
-Behind a `PromptCompiler` interface. The compiled prompt is a structured object:
+Behind a `PromptCompiler` interface:
 
 ```typescript
 interface PromptCompiler {
@@ -273,20 +322,38 @@ interface PromptCompiler {
 }
 
 interface CompiledPrompt {
-  prompt: string;              // final prompt text
-  skills: SkillDefinition[];   // skills to inject
-  agents: AgentDefinition[];   // agents to inject
-  flags: string[];             // extra claude CLI flags
+  prompt: string;    // final prompt text
+  flags: string[];   // extra claude CLI flags
 }
 ```
 
 **Assembly order:**
 1. Type prompt template (from `.ralph/types/<type>/prompt.md`)
 2. Task body (the actual task content)
-3. Injected skills (from `.ralph/types/<type>/skills/`)
-4. Loop context (iteration number, previous outcomes, state)
+3. Loop context (iteration number, previous outcomes, state)
 
 Same task + same type = same prompt structure. Deterministic.
+
+Skills and agents are NOT part of the compiled prompt. They are pre-deployed to `.claude/skills/` and `.claude/agents/` via `ralph sync` and discovered by Claude Code automatically from the filesystem.
+
+### Git Synchronization
+
+Behind a `GitSynchronizer` interface:
+
+```typescript
+interface GitSynchronizer {
+  pull(): Promise<SyncResult>;           // git pull --rebase
+  commitAndPush(message: string): Promise<SyncResult>;
+}
+
+interface SyncResult {
+  success: boolean;
+  error?: string;      // conflict details, network error, etc.
+  hash?: string;       // new HEAD after operation
+}
+```
+
+If `pull()` fails due to merge conflict, the loop stops and reports the conflict. It does not silently proceed with stale data.
 
 ### Circuit Breakers
 
@@ -301,37 +368,30 @@ Configurable per-project in `.ralph/project.json`:
 | `maxTokens` | Stop when total tokens exceed threshold | none |
 | `maxIterations` | Hard limit on total iterations | none |
 
-### Review Flow
-
-No special review infrastructure. Reviews use the existing task queue:
-
-1. Worker completes task → sets status to `review_pending`
-2. Next "pick next" cycle sees it (review tasks can be prioritized via type config)
-3. `review` type loads review-specific prompt + skills
-4. Reviewer either marks `completed` or creates new bug-fix tasks with `priority: 1`
-5. Bug fixes naturally jump the queue on the next iteration
-
 ---
 
 ## 5. Observability
 
 ### Structured Logs
 
-Each iteration produces a JSON log file in `.ralph/logs/`:
+Each iteration produces a JSON log file in `.ralph-local/logs/`:
 
 ```
-.ralph/logs/
+.ralph-local/logs/
   2026-03-02T10-00-00-fix-auth-bug.json
   2026-03-02T10-15-30-add-user-profile.json
 ```
+
+Logs are gitignored (in `.ralph-local/`). They're local runtime output, not project data.
 
 ### Log Schema (per iteration)
 
 ```json
 {
   "iteration": 4,
-  "task_id": "fix-auth-bug-20260302",
+  "task_id": "fix-auth-bug-20260302T100532",
   "task_type": "bug-fix",
+  "model": "claude-sonnet-4-20250514",
   "started_at": "2026-03-02T10:00:00Z",
   "ended_at": "2026-03-02T10:14:22Z",
   "duration_seconds": 862,
@@ -355,6 +415,8 @@ Each iteration produces a JSON log file in `.ralph/logs/`:
   ]
 }
 ```
+
+**Cost estimation:** The log records the model used per iteration. The CLI ships a configurable pricing table (model → cost per input/output token) for cost calculation. The pricing table is user-editable for when Anthropic changes prices.
 
 ### Collector v2
 
@@ -449,8 +511,8 @@ ralph-cli/
       bug-fix/
       research/
       review/
-    skills/                   ← shared skills (not type-specific)
-    agents/                   ← shared agents
+    skills/                   ← Claude Code skills
+    agents/                   ← Claude Code agents
 ```
 
 ### Sync Mechanism
@@ -459,10 +521,12 @@ ralph-cli/
 
 ```
 ralph sync
-  → built-in/types/   → .ralph/types/    (merge, respect customizations)
-  → built-in/skills/  → .ralph/skills/
-  → built-in/agents/  → .ralph/agents/
+  → built-in/types/    → .ralph/types/       (tracked, hash-based merge)
+  → built-in/skills/   → .claude/skills/      (Claude Code discovery path)
+  → built-in/agents/   → .claude/agents/      (Claude Code discovery path)
 ```
+
+Skills and agents go into `.claude/` (not `.ralph/`) because that's where Claude Code discovers them from. Type definitions go into `.ralph/types/` because they're Ralph's concern.
 
 ### Customization
 
@@ -473,20 +537,32 @@ Projects can override bundled definitions. Resolution order:
 
 If `.ralph/types/feature-dev/prompt.md` exists in the project, it takes precedence over the bundled version.
 
-### Version Tracking
+### Sync Conflict Resolution (Hash-Based)
 
-`.ralph/sync-manifest.json` tracks sync state:
+`.ralph-local/sync-manifest.json` tracks sync state including file hashes:
 
 ```json
 {
   "last_sync": "2026-03-02T10:00:00Z",
   "cli_version": "2.1.0",
-  "synced_types": ["feature-dev", "bug-fix", "research", "review"],
-  "custom_overrides": ["feature-dev/prompt.md"]
+  "files": {
+    ".ralph/types/feature-dev/prompt.md": {
+      "synced_hash": "abc123",
+      "source": "built-in"
+    },
+    ".claude/skills/code-review.md": {
+      "synced_hash": "def456",
+      "source": "built-in"
+    }
+  }
 }
 ```
 
-`ralph sync` knows what's custom and won't overwrite it.
+On `ralph sync`:
+- **File hash matches manifest** → user didn't modify it → safe to overwrite with new CLI version
+- **File hash differs from manifest** → user customized it → skip, warn: `"Skipped .ralph/types/feature-dev/prompt.md (locally modified). Review CLI update manually."`
+
+This follows the same pattern as package manager conffile handling (dpkg, pacman).
 
 ---
 
@@ -509,7 +585,7 @@ If `.ralph/types/feature-dev/prompt.md` exists in the project, it takes preceden
 1. Build v2 CLI alongside v1 scripts (they can coexist)
 2. `ralph migrate` converts v1 Markdown epics/stories → v2 task files
 3. `ralph init node` sets up Node environment on existing VPS
-4. `ralph init project` scaffolds `.ralph/` in existing projects
+4. `ralph init project` scaffolds `.ralph/` + `.ralph-local/` in existing projects
 5. Deprecate v1 `bin/` scripts once v2 is proven stable
 
 ---
@@ -522,3 +598,14 @@ If `.ralph/types/feature-dev/prompt.md` exists in the project, it takes preceden
 - **Web dashboard** — terminal-first
 - **Docker** — still just SSH + tmux
 - **API server on VPS** — SSH is sufficient for remote control
+- **Task queue indexing** — frontmatter parsing is fast enough at realistic task counts (<200). Add an index file if/when this becomes a bottleneck
+- **Concurrency** — single user, single loop per project. Documented constraint, not a bug
+
+---
+
+## 11. Known Constraints
+
+- **Single loop per project:** Only one loop runs per project at a time. No concurrent execution model.
+- **Task ID uniqueness:** Relies on slug + second-precision timestamp. Two tasks with identical titles created in the same second would collide (practically impossible in normal use).
+- **Log disk growth:** `.ralph-local/logs/` grows unbounded. Operational concern — add log rotation policy to loop config (keep last N iterations).
+- **Git merge conflicts:** The pull → work → push cycle can conflict if the Client pushes while a loop is mid-iteration. Mitigated by task files being independent (one file per task), but possible. Loop stops and reports on conflict rather than silently proceeding.
