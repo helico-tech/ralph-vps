@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { mkdir } from "node:fs/promises";
 
 const ROOT_DIR = join(import.meta.dir, "../../..");
 
@@ -10,6 +11,13 @@ export async function startTestVps(): Promise<void> {
   if (proc.exitCode !== 0) {
     throw new Error(`Failed to start test VPS: ${proc.stderr.toString()}`);
   }
+
+  // Clear stale host key — container rebuilds generate new keys
+  Bun.spawnSync(
+    ["ssh-keygen", "-R", "[localhost]:2222"],
+    { stderr: "pipe", stdout: "pipe" }
+  );
+
   await waitForSsh();
 }
 
@@ -45,12 +53,13 @@ export async function waitForSsh(
 export async function getTestKeyPath(): Promise<string> {
   // Extract the test key from the container
   const keyPath = join(ROOT_DIR, ".ralph-local/test-ssh-key");
+  await mkdir(dirname(keyPath), { recursive: true });
   const proc = Bun.spawnSync(
     ["docker", "compose", "-f", "docker-compose.test.yml", "cp", "test-vps:/tmp/test-ssh-key", keyPath],
     { cwd: ROOT_DIR, stderr: "pipe", stdout: "pipe" }
   );
   if (proc.exitCode !== 0) {
-    throw new Error("Failed to extract test SSH key");
+    throw new Error(`Failed to extract test SSH key: ${proc.stderr.toString()}`);
   }
   // Fix permissions
   Bun.spawnSync(["chmod", "600", keyPath]);

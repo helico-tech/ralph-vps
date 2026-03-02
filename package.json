@@ -9,7 +9,9 @@
     "dev": "bun run src/index.ts",
     "typecheck": "bun x tsc --noEmit",
     "test": "bun test src/domain src/adapters src/cli",
-    "test:integration": "bun test src/__tests__/integration"
+    "test:integration": "bun test src/__tests__/integration",
+    "docker:up": "docker compose -f docker-compose.test.yml up -d --build",
+    "docker:down": "docker compose -f docker-compose.test.yml down -v"
   },
   "dependencies": {
     "commander": "^13.1.0",

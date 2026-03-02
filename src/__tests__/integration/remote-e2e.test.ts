@@ -62,7 +62,7 @@ describe("Remote control E2E (Docker)", () => {
 
     const result = await executor.execute({
       node: "test-vps",
-      command: ["sh", "-c", "echo oops >&2; exit 1"],
+      command: ["echo oops >&2; exit 1"],
     });
 
     expect(result.exitCode).toBe(1);
