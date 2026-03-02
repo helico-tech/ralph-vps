@@ -9,7 +9,7 @@ import { GitProgressDetector } from "../../adapters/git-progress-detector";
 import { JsonLogStore } from "../../adapters/json-log-store";
 import { FsTypeResolver } from "../../adapters/fs-type-resolver";
 import { FsConfigProvider } from "../../adapters/fs-config-provider";
-import type { GitSynchronizer } from "../../ports/git-synchronizer";
+import { ShellGitSynchronizer } from "../../adapters/shell-git-synchronizer";
 import { STATE_FILE } from "../../constants";
 
 export function registerLoopCommands(
@@ -62,22 +62,13 @@ export function registerLoopCommands(
         process.exit(1);
       }
 
-      // Create a minimal git synchronizer that does nothing on local
-      // (ShellGitSynchronizer will be wired in Phase 8)
-      const noopGitSync: GitSynchronizer = {
-        async pull() { return { success: true }; },
-        async commitAndPush() { return { success: true }; },
-        async isClean() { return true; },
-        async getCurrentHash() { return "local"; },
-      };
-
       const deps: LoopEngineDeps = {
         taskRepository: new FsTaskRepository(projectRoot),
         taskSelector: new PriorityTaskSelector(),
         promptCompiler: new TemplatePromptCompiler(),
         processRunner: new ClaudeProcessRunner(),
         progressDetector: new GitProgressDetector(),
-        gitSynchronizer: noopGitSync,
+        gitSynchronizer: new ShellGitSynchronizer(),
         logStore: new JsonLogStore(projectRoot),
         typeResolver: new FsTypeResolver(projectRoot),
         projectName: projectConfig.name,
