@@ -1,15 +1,15 @@
 # Provisioning Ralph on a Hetzner VPS
 
-Complete guide to getting Ralph running on a Hetzner Cloud VPS so you can remotely dispatch AI-powered coding tasks.
+Get Ralph running on a VPS so you can remotely dispatch AI-powered coding tasks.
 
-## Architecture Overview
+## Architecture
 
 ```
 ┌─────────────────────┐          SSH (control)          ┌──────────────────────┐
 │   Your Machine      │ ──────────────────────────────▶ │   Hetzner VPS        │
 │                     │                                 │                      │
 │   ralph remote      │          Git (data)             │   ralph loop run     │
-│   ralph node add    │ ◀──────────────────────────────▶│   (inside tmux)      │
+│   ralph node        │ ◀──────────────────────────────▶│   (inside tmux)      │
 │                     │       (shared git remote)       │                      │
 │   .ralph/           │                                 │   .ralph/            │
 │     client.json     │                                 │     project.json     │
@@ -18,201 +18,222 @@ Complete guide to getting Ralph running on a Hetzner Cloud VPS so you can remote
 ```
 
 - **SSH** is the control plane — you send commands (`loop start`, `loop status`, etc.)
-- **Git** is the data plane — tasks are markdown files synced via a shared remote (GitHub, etc.)
+- **Git** is the data plane — tasks are markdown files synced via a shared remote
 - **No daemon, no API server** — the VPS just runs `ralph` via SSH
 
-## 1. Create the Hetzner VPS
+## 1. Create the VPS and Prepare Root
 
-Go to [Hetzner Cloud Console](https://console.hetzner.cloud/) and create a server:
+This is the only part you do manually via SSH. Everything after this is automated from your local machine.
+
+### 1.1 Create the Server
+
+[Hetzner Cloud Console](https://console.hetzner.cloud/):
 
 | Setting | Recommendation |
 |---|---|
-| **Location** | Falkenstein (fsn1) or Nuremberg (nbg1) — cheapest EU |
 | **Image** | Ubuntu 24.04 |
-| **Type** | CX22 (2 vCPU, 4 GB RAM) — minimum viable; CX32 if running multiple projects |
-| **SSH Key** | Add your public key during creation |
-| **Networking** | Public IPv4 + IPv6 |
+| **Type** | CX22 (2 vCPU, 4 GB) — minimum viable |
+| **SSH Key** | Add your public key |
 | **Firewall** | Allow TCP 22 inbound only |
 
-Cost: ~€4-8/month. Ralph itself is lightweight — the bottleneck is the Claude API, not compute.
+### 1.2 Root Setup
 
-## 2. Initial Server Setup
-
-SSH in as root and lock things down:
+SSH in as root once to create the `ralph` user and harden the server:
 
 ```bash
 ssh root@<your-vps-ip>
-```
 
-### 2.1 System Updates
-
-```bash
+# System updates
 apt update && apt upgrade -y
-```
 
-### 2.2 Create the `ralph` User
+# Install system packages
+apt install -y git tmux
 
-```bash
+# Create ralph user
 useradd -m -s /bin/bash ralph
 mkdir -p /home/ralph/.ssh
 cp ~/.ssh/authorized_keys /home/ralph/.ssh/authorized_keys
 chmod 700 /home/ralph/.ssh
 chmod 600 /home/ralph/.ssh/authorized_keys
 chown -R ralph:ralph /home/ralph/.ssh
-```
 
-If you want to use a **separate** SSH key for Ralph (recommended), replace the `cp` step:
-
-```bash
-echo "ssh-ed25519 AAAA... your-ralph-key" > /home/ralph/.ssh/authorized_keys
-```
-
-### 2.3 Harden SSH
-
-Edit `/etc/ssh/sshd_config`:
-
-```
-Port 22
-PermitRootLogin no
-PubkeyAuthentication yes
-PasswordAuthentication no
-ChallengeResponseAuthentication no
-X11Forwarding no
-```
-
-```bash
+# Harden SSH — edit /etc/ssh/sshd_config:
+#   PermitRootLogin no
+#   PasswordAuthentication no
+#   ChallengeResponseAuthentication no
 systemctl restart sshd
 ```
 
-> **Test** that you can `ssh ralph@<your-vps-ip>` before you close the root session.
+> **Test** that `ssh ralph@<your-vps-ip>` works before closing the root session.
 
-### 2.4 Firewall (if not using Hetzner's Cloud Firewall)
+### 1.3 Install Claude Code CLI
 
-```bash
-apt install -y ufw
-ufw allow 22/tcp
-ufw enable
-```
-
-## 3. Install Dependencies
-
-> **Automated alternative**: After setting up your client (section 7), you can run `ralph node setup my-vps --git-name "Ralph Bot" --git-email "ralph@yourdomain.com" --api-key "sk-ant-..."` to install Bun, Ralph, configure git, and set the API key in one shot. System packages (3.1) and Claude Code CLI (3.3) still need manual install.
-
-SSH in as `ralph`:
+SSH in as `ralph` and install Claude Code:
 
 ```bash
 ssh ralph@<your-vps-ip>
-```
-
-### 3.1 System Packages
-
-```bash
-sudo apt install -y git tmux
-```
-
-That's it for system packages. SSH server is already running.
-
-### 3.2 Install Bun
-
-```bash
-curl -fsSL https://bun.sh/install | bash
-source ~/.bashrc
-bun --version
-```
-
-### 3.3 Install Claude Code CLI
-
-```bash
 npm install -g @anthropic-ai/claude-code
-# or via bun:
-bun install -g @anthropic-ai/claude-code
-```
-
-Authenticate:
-
-```bash
 claude auth login
-# Follow the prompts — you need an Anthropic API key or OAuth
 ```
 
-Verify it works:
+This step requires interactive authentication and can't be automated.
+
+## 2. Set Up Your Local Client
+
+On your local machine, in your project repo:
 
 ```bash
-claude --version
-claude -p "Say hello" --output-format text
+ralph init client
+ralph node add my-vps --host <your-vps-ip> --user ralph --identity-file ~/.ssh/id_ed25519
 ```
 
-### 3.4 Install Ralph
-
-Clone the ralph repo and link it globally:
+Test the connection:
 
 ```bash
-mkdir -p ~/tools
-cd ~/tools
-git clone <your-ralph-repo-url> ralph
-cd ralph
-bun install
-bun link
+ralph remote my-vps echo hello
 ```
 
-This puts `ralph` on your PATH. Verify:
+## 3. Bootstrap the Node
+
+Everything from here runs from your local machine. No more SSHing in.
+
+### 3.1 Generate Deploy Key
 
 ```bash
-ralph version
+ralph node deploy-key my-vps
 ```
 
-### 3.5 Configure Git
+This generates an SSH key on the VPS and prints the public key. Add it as a deploy key on GitHub: **Repo → Settings → Deploy keys → Add deploy key** (check "Allow write access").
 
-Required for task state commits:
+### 3.2 Install Tooling
 
 ```bash
-git config --global user.name "Ralph Bot"
-git config --global user.email "ralph@yourdomain.com"
+ralph node setup my-vps \
+  --git-name "Ralph Bot" \
+  --git-email "ralph@yourdomain.com" \
+  --api-key "sk-ant-..."
 ```
 
-## 4. Set Up GitHub SSH Access
+This installs Bun, clones and links Ralph, configures git identity, creates `~/projects`, and sets the Anthropic API key.
 
-The VPS needs to pull and push to your private repos. A **deploy key** is the right approach — it's scoped to a single repo, no GitHub account credentials on the VPS.
-
-> **Automated alternative**: `ralph node deploy-key my-vps` generates the key, prints it with GitHub instructions, and accepts the host key — all from your local machine.
-
-### 4.1 Generate an SSH Key on the VPS
+### 3.3 Clone a Project
 
 ```bash
-ssh-keygen -t ed25519 -C "ralph@your-vps" -f ~/.ssh/id_ed25519 -N ""
+ralph node clone my-vps git@github.com:you/your-project.git
 ```
 
-### 4.2 Add as Deploy Key on GitHub
+This clones the repo into `~/projects/<name>`, runs `ralph init project`, and `ralph sync`.
 
-Copy the public key:
+### 3.4 Verify
 
 ```bash
-cat ~/.ssh/id_ed25519.pub
+ralph node projects my-vps
 ```
 
-Then in your repo on GitHub: **Settings → Deploy keys → Add deploy key**
-- Title: `ralph-vps`
-- Key: paste the public key
-- Check **Allow write access** (Ralph needs to push task state)
+```
+NAME            PATH                          PHASE     ITERATION
+your-project    ~/projects/your-project       idle      0
+```
 
-### 4.3 Accept GitHub's Host Key
+## 4. Workflow
+
+### Start the loop
 
 ```bash
-ssh -T git@github.com
-# Type "yes" to accept the fingerprint
-# You should see: "Hi <repo>! You've successfully authenticated..."
+ralph remote my-vps loop start
 ```
 
-### 4.4 Multiple Repos
-
-Deploy keys are per-repo. If you run multiple projects, you need a key per repo and an SSH config to match them:
+### Add tasks
 
 ```bash
-# Generate a second key
-ssh-keygen -t ed25519 -C "ralph@your-vps/project-b" -f ~/.ssh/id_ed25519_project_b -N ""
+ralph task add "Fix authentication bug" --type bug-fix --priority 1
+git add .ralph/tasks/ && git commit -m "Add task" && git push
 ```
 
-Add to `~/.ssh/config`:
+### Monitor
+
+```bash
+ralph remote my-vps loop status     # Quick status
+ralph remote my-vps log list        # Recent logs
+ralph remote my-vps log errors      # Errors
+ralph remote my-vps loop attach     # Live tmux (Ctrl+B, D to detach)
+```
+
+### Stop
+
+```bash
+ralph remote my-vps loop stop
+```
+
+## 5. Circuit Breakers
+
+Edit `.ralph/project.json`:
+
+```json
+{
+  "name": "my-project",
+  "circuitBreakers": {
+    "maxConsecutiveErrors": 3,
+    "maxStallIterations": 5,
+    "maxCostUsd": 50,
+    "maxIterations": 20
+  }
+}
+```
+
+| Breaker | Default | What it does |
+|---|---|---|
+| `maxConsecutiveErrors` | 3 | Stops after N consecutive failed iterations |
+| `maxStallIterations` | 5 | Stops after N iterations with no progress |
+| `maxCostUsd` | 0 (off) | Stops when cumulative cost exceeds $N |
+| `maxTokens` | 0 (off) | Stops when cumulative tokens exceed N |
+| `maxIterations` | 0 (off) | Stops after N total iterations |
+
+Set `maxCostUsd` on a VPS. You don't want a runaway loop burning through your API credits while you sleep.
+
+## 6. Multiple Projects
+
+Each project gets its own tmux session (`ralph-<project-name>`):
+
+```bash
+ralph node clone my-vps git@github.com:you/project-b.git
+ralph node projects my-vps    # verify both listed
+```
+
+## 7. Troubleshooting
+
+### "claude: command not found" in tmux
+
+Make sure `~/.bun/bin` is in PATH in `~/.bashrc` (not just `.profile`):
+
+```bash
+ralph remote my-vps 'echo "export PATH=\$HOME/.bun/bin:\$PATH" >> ~/.bashrc'
+```
+
+### SSH connection refused
+
+- Firewall allows port 22: `sudo ufw status`
+- sshd running: `systemctl status sshd`
+- Key permissions: `chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys`
+
+### Loop exits immediately
+
+```bash
+ralph remote my-vps loop status
+ralph remote my-vps log errors
+```
+
+Common causes: no `ready` tasks, circuit breaker tripped, Claude CLI not authenticated.
+
+### Git push/pull failing
+
+- VPS has SSH key access to the git remote
+- No merge conflicts in `.ralph/tasks/`
+- Remote is reachable from the VPS
+
+### Multiple repos with deploy keys
+
+Deploy keys are per-repo. For multiple repos, add an `~/.ssh/config` on the VPS with host aliases:
 
 ```
 Host github-project-a
@@ -226,242 +247,6 @@ Host github-project-b
   IdentityFile ~/.ssh/id_ed25519_project_b
 ```
 
-Then clone using the host alias:
+Then clone using the alias: `git clone github-project-b:you/project-b.git`
 
-```bash
-git clone github-project-b:you/project-b.git
-```
-
-> **Alternative**: If you run many repos, adding the VPS key to a GitHub account (Settings → SSH keys) is simpler — one key, all repos that account can access. Trade-off is a bigger blast radius.
-
-## 5. Set Up the API Key
-
-The Claude CLI needs authentication when `ralph loop run` spawns it inside tmux. Add to `~/.bashrc`:
-
-```bash
-echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.bashrc
-```
-
-> tmux inherits the environment of the shell that launches it, so `.bashrc` works.
-> If you use `.profile` instead, make sure tmux sessions pick it up.
-
-## 6. Set Up a Project on the VPS
-
-> **Automated alternative**: `ralph node clone my-vps git@github.com:you/your-project.git` clones the repo, runs `ralph init project`, and `ralph sync` in one command. Then use `ralph node projects my-vps` to verify it's listed.
-
-### 6.1 Clone Your Project
-
-```bash
-mkdir -p ~/projects
-cd ~/projects
-git clone git@github.com:you/your-project.git
-cd your-project
-```
-
-### 6.2 Initialize Ralph
-
-```bash
-ralph init project my-project
-```
-
-This creates:
-```
-.ralph/
-  project.json          # Project config
-  tasks/                # Task storage
-  types/                # Custom type templates
-.ralph-local/
-  logs/                 # Iteration logs (gitignored)
-```
-
-### 6.3 Sync Built-in Task Types
-
-```bash
-ralph sync
-```
-
-Copies the built-in prompt templates (`feature-dev`, `bug-fix`, `research`, `review`) to `.ralph/types/`.
-
-### 6.4 Commit the Ralph Config
-
-```bash
-git add .ralph/
-git commit -m "Initialize Ralph project config"
-git push
-```
-
-## 7. Set Up Your Local Machine (Client)
-
-On your local machine, in the same project repo:
-
-```bash
-cd ~/your-project
-ralph init client
-ralph node add my-vps --host <your-vps-ip> --user ralph --identity-file ~/.ssh/id_ed25519
-```
-
-This writes `.ralph/client.json`:
-
-```json
-{
-  "nodes": {
-    "my-vps": {
-      "host": "123.45.67.89",
-      "user": "ralph",
-      "port": 22,
-      "identityFile": "~/.ssh/id_ed25519"
-    }
-  }
-}
-```
-
-Test the connection:
-
-```bash
-ralph remote my-vps version
-```
-
-### Automated Node Setup
-
-Once your client is configured and system packages are installed (step 3.1), you can bootstrap the entire VPS from your local machine:
-
-```bash
-# 1. Generate deploy key and get GitHub instructions
-ralph node deploy-key my-vps
-
-# 2. (Manual) Add the printed public key to GitHub as a deploy key
-
-# 3. Install Bun, Ralph, configure git and API key
-ralph node setup my-vps --git-name "Ralph Bot" --git-email "ralph@yourdomain.com" --api-key "sk-ant-..."
-
-# 4. Clone a project and initialize Ralph
-ralph node clone my-vps git@github.com:you/your-project.git
-
-# 5. Verify
-ralph node projects my-vps
-```
-
-## 8. Workflow
-
-### Add a task (locally)
-
-```bash
-ralph task add "Fix authentication bug in login flow" --type bug-fix --priority 1
-git add .ralph/tasks/
-git commit -m "Add auth bug fix task"
-git push
-```
-
-### Pull tasks on VPS and start the loop
-
-```bash
-ralph remote my-vps loop start
-# Or SSH in directly:
-ssh ralph@<your-vps-ip>
-cd ~/projects/your-project
-git pull
-ralph loop start
-```
-
-### Monitor
-
-```bash
-ralph remote my-vps loop status     # Quick status check
-ralph remote my-vps log list        # Recent iteration logs
-ralph remote my-vps log errors      # Any errors?
-ralph remote my-vps loop attach     # Live tmux session (Ctrl+B, D to detach)
-```
-
-### Stop
-
-```bash
-ralph remote my-vps loop stop
-```
-
-## 9. Circuit Breaker Configuration
-
-Edit `.ralph/project.json` to tune safety limits:
-
-```json
-{
-  "name": "my-project",
-  "circuitBreakers": {
-    "maxConsecutiveErrors": 3,
-    "maxStallIterations": 5,
-    "maxCostUsd": 50,
-    "maxTokens": 0,
-    "maxIterations": 20
-  }
-}
-```
-
-| Breaker | Default | What it does |
-|---|---|---|
-| `maxConsecutiveErrors` | 3 | Stops after N consecutive failed iterations |
-| `maxStallIterations` | 5 | Stops after N iterations with no progress (no commits, no file changes) |
-| `maxCostUsd` | 0 (off) | Stops when cumulative cost exceeds $N |
-| `maxTokens` | 0 (off) | Stops when cumulative tokens exceed N |
-| `maxIterations` | 0 (off) | Stops after N total iterations |
-
-Set `maxCostUsd` on a VPS. You don't want a runaway loop burning through your API credits while you sleep. 💸
-
-## 10. Multiple Projects
-
-Each project gets its own tmux session (`ralph-<project-name>`). To run multiple projects:
-
-```bash
-cd ~/projects/project-a && ralph loop start
-cd ~/projects/project-b && ralph loop start
-```
-
-They run independently. Monitor each with `ralph loop status` from the respective directory.
-
-## 11. Troubleshooting
-
-### "claude: command not found" in tmux
-
-tmux inherits the environment of the launching shell. If `claude` is installed via `bun install -g`, make sure `~/.bun/bin` is in your PATH in `~/.bashrc` (not just `.profile`):
-
-```bash
-echo 'export PATH="$HOME/.bun/bin:$PATH"' >> ~/.bashrc
-```
-
-### SSH connection refused
-
-- Check the firewall allows port 22: `sudo ufw status`
-- Check sshd is running: `systemctl status sshd`
-- Check key permissions: `chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys`
-
-### Loop exits immediately
-
-Check the state and logs:
-
-```bash
-ralph loop status
-ralph log errors
-ralph log list -n 5
-```
-
-Common causes:
-- No tasks in `ready` status
-- Circuit breaker tripped (check state.json)
-- Claude CLI not authenticated
-
-### Git push/pull failing in the loop
-
-The loop runs `git pull --rebase` before each iteration and `git add .ralph/ && git commit && git push` after. If this fails, check:
-- The VPS has SSH key access to the git remote
-- There are no merge conflicts in `.ralph/tasks/`
-- The remote is reachable from the VPS
-
-## Dependency Summary
-
-| Dependency | Purpose | Install |
-|---|---|---|
-| **Ubuntu 24.04** | OS | Hetzner image |
-| **openssh-server** | Remote control | Pre-installed on Ubuntu |
-| **git** | Data sync, progress detection | `apt install git` |
-| **tmux** | Loop session management | `apt install tmux` |
-| **Bun** | Runtime | `curl -fsSL https://bun.sh/install \| bash` |
-| **Claude Code CLI** | AI execution | `bun install -g @anthropic-ai/claude-code` |
-| **Ralph** | Loop orchestrator | Clone + `bun install` + `bun link` |
+Alternative: add the VPS key to a GitHub account (Settings → SSH keys) — one key, all repos. Bigger blast radius.

@@ -201,45 +201,62 @@ describe("node projects (Docker)", () => {
   test("lists projects with status", async () => {
     const executor = await createExecutor();
 
-    // Set up two fake projects with project.json
+    // Set up two fake projects — each command is a single string so SSH
+    // passes it directly to the remote shell without arg-concatenation mangling.
     await executor.execute({
       node: "test-vps",
-      command: [
-        "bash", "-c",
-        '"mkdir -p ~/projects/app-a/.ralph && echo \'{\\"name\\":\\"app-a\\"}\' > ~/projects/app-a/.ralph/project.json"',
-      ],
+      command: ["mkdir", "-p", "~/projects/app-a/.ralph"],
     });
     await executor.execute({
       node: "test-vps",
-      command: [
-        "bash", "-c",
-        '"mkdir -p ~/projects/app-b/.ralph ~/projects/app-b/.ralph-local && echo \'{\\"name\\":\\"app-b\\"}\' > ~/projects/app-b/.ralph/project.json && echo \'{\\"phase\\":\\"running\\",\\"iteration\\":5}\' > ~/projects/app-b/.ralph-local/state.json"',
-      ],
+      command: [`echo '{"name":"app-a"}' > ~/projects/app-a/.ralph/project.json`],
+    });
+    await executor.execute({
+      node: "test-vps",
+      command: ["mkdir", "-p", "~/projects/app-b/.ralph", "~/projects/app-b/.ralph-local"],
+    });
+    await executor.execute({
+      node: "test-vps",
+      command: [`echo '{"name":"app-b"}' > ~/projects/app-b/.ralph/project.json`],
+    });
+    await executor.execute({
+      node: "test-vps",
+      command: [`echo '{"phase":"running","iteration":5}' > ~/projects/app-b/.ralph-local/state.json`],
     });
 
-    // Run the same shell one-liner the projects command uses
-    const script = [
-      "for dir in ~/projects/*/; do",
-      '  [ -d "$dir" ] || continue;',
-      '  name=$(basename "$dir");',
-      '  pjson="$dir/.ralph/project.json";',
-      '  sjson="$dir/.ralph-local/state.json";',
-      '  if [ -f "$pjson" ]; then',
-      '    phase="idle"; iteration="0";',
-      '    if [ -f "$sjson" ]; then',
-      '      phase=$(grep -o \'"phase":"[^"]*"\' "$sjson" | head -1 | cut -d\\" -f4);',
-      '      iteration=$(grep -o \'"iteration":[0-9]*\' "$sjson" | head -1 | sed "s/.*://");',
-      '      [ -z "$phase" ] && phase="idle";',
-      '      [ -z "$iteration" ] && iteration="0";',
-      "    fi;",
-      '    echo "$name|$dir|$phase|$iteration";',
-      "  fi;",
-      "done",
-    ].join(" ");
+    // Write the listing script to a temp file on the remote, then execute it.
+    // This avoids the multi-layer quoting nightmare of SSH → bash -c → grep.
+    const script = `#!/bin/bash
+for dir in ~/projects/*/; do
+  [ -d "$dir" ] || continue
+  name=$(basename "$dir")
+  pjson="$dir/.ralph/project.json"
+  sjson="$dir/.ralph-local/state.json"
+  if [ -f "$pjson" ]; then
+    phase="idle"; iteration="0"
+    if [ -f "$sjson" ]; then
+      phase=$(grep -o '"phase":"[^"]*"' "$sjson" | head -1 | cut -d'"' -f4)
+      iteration=$(grep -o '"iteration":[0-9]*' "$sjson" | head -1 | sed 's/.*://')
+      [ -z "$phase" ] && phase="idle"
+      [ -z "$iteration" ] && iteration="0"
+    fi
+    echo "$name|$dir|$phase|$iteration"
+  fi
+done
+`;
+    // Write script via heredoc
+    await executor.execute({
+      node: "test-vps",
+      command: ["bash", "-c", `cat > /tmp/list-projects.sh << 'SCRIPT'\n${script}SCRIPT`],
+    });
+    await executor.execute({
+      node: "test-vps",
+      command: ["chmod", "+x", "/tmp/list-projects.sh"],
+    });
 
     const result = await executor.execute({
       node: "test-vps",
-      command: ["bash", "-c", `'${script}'`],
+      command: ["bash", "/tmp/list-projects.sh"],
     });
 
     expect(result.exitCode).toBe(0);
