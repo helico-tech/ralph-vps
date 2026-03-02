@@ -1,0 +1,11 @@
+export { FsConfigProvider } from "./fs-config-provider";
+export { FsTaskRepository } from "./fs-task-repository";
+export { PriorityTaskSelector } from "./priority-task-selector";
+export { JsonLogStore } from "./json-log-store";
+export { TemplatePromptCompiler } from "./template-prompt-compiler";
+export { FsTypeResolver } from "./fs-type-resolver";
+export { GitProgressDetector } from "./git-progress-detector";
+export { ClaudeProcessRunner } from "./claude-process-runner";
+export { ShellGitSynchronizer } from "./shell-git-synchronizer";
+export { SshRemoteExecutor } from "./ssh-remote-executor";
+export { FsLoopState } from "./fs-loop-state";

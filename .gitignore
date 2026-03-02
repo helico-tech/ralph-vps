@@ -1,13 +1,14 @@
-# Runtime directories
-projects/
-logs/
-
-# Local config (generated from ralph.conf.default)
-config/ralph.conf
-
 # Environment
 .env
 *.log
+
+# Node / Bun
+node_modules/
+bun.lock
+dist/
+
+# Ralph local state
+.ralph-local/
 
 # OS
 .DS_Store

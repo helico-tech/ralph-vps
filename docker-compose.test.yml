@@ -1,0 +1,16 @@
+services:
+  test-vps:
+    build:
+      context: ./docker/test-vps
+    ports:
+      - "2222:22"
+    volumes:
+      - test-ssh-keys:/tmp
+    healthcheck:
+      test: ["CMD", "pgrep", "sshd"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  test-ssh-keys:
