@@ -38,7 +38,7 @@ This is the only part you do manually via SSH. Everything after this is automate
 
 ### 1.2 Root Setup
 
-SSH in as root once to create the `ralph` user and harden the server:
+SSH in as root to create the `ralph` user and prepare the server:
 
 ```bash
 ssh root@<your-vps-ip>
@@ -47,10 +47,14 @@ ssh root@<your-vps-ip>
 apt update && apt upgrade -y
 
 # Install system packages
-apt install -y git tmux
+apt install -y git tmux nodejs npm
 
-# Create ralph user
+# Create ralph user with root privileges
 useradd -m -s /bin/bash ralph
+usermod -aG sudo ralph
+echo "ralph ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ralph
+
+# Set up SSH access for ralph
 mkdir -p /home/ralph/.ssh
 cp ~/.ssh/authorized_keys /home/ralph/.ssh/authorized_keys
 chmod 700 /home/ralph/.ssh
@@ -61,7 +65,7 @@ chown -R ralph:ralph /home/ralph/.ssh
 #   PermitRootLogin no
 #   PasswordAuthentication no
 #   ChallengeResponseAuthentication no
-systemctl restart sshd
+systemctl restart ssh
 ```
 
 > **Test** that `ssh ralph@<your-vps-ip>` works before closing the root session.
@@ -72,7 +76,7 @@ SSH in as `ralph` and install Claude Code:
 
 ```bash
 ssh ralph@<your-vps-ip>
-npm install -g @anthropic-ai/claude-code
+sudo npm install -g @anthropic-ai/claude-code
 claude auth login
 ```
 
@@ -109,12 +113,13 @@ This generates an SSH key on the VPS and prints the public key. Add it as a depl
 
 ```bash
 ralph node setup my-vps \
+  --ralph-repo git@github.com:you/ralph.git \
   --git-name "Ralph Bot" \
   --git-email "ralph@yourdomain.com" \
   --api-key "sk-ant-..."
 ```
 
-This installs Bun, clones and links Ralph, configures git identity, creates `~/projects`, and sets the Anthropic API key.
+This installs Bun, clones and links Ralph from the given repo URL, configures git identity, creates `~/projects`, and sets the Anthropic API key.
 
 ### 3.3 Clone a Project
 
@@ -210,10 +215,28 @@ Make sure `~/.bun/bin` is in PATH in `~/.bashrc` (not just `.profile`):
 ralph remote my-vps 'echo "export PATH=\$HOME/.bun/bin:\$PATH" >> ~/.bashrc'
 ```
 
+### SSH "Permission denied (publickey)"
+
+Ralph uses `BatchMode=yes` for SSH, which means it won't prompt for a passphrase. If your identity file is passphrase-protected, SSH silently fails to sign the authentication challenge.
+
+**Fix:** Load the key into your ssh-agent:
+
+```bash
+ssh-add ~/.ssh/id_ed25519
+```
+
+To persist across reboots (macOS):
+
+```bash
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+```
+
+You can verify the key is loaded with `ssh-add -l`.
+
 ### SSH connection refused
 
 - Firewall allows port 22: `sudo ufw status`
-- sshd running: `systemctl status sshd`
+- sshd running: `systemctl status ssh`
 - Key permissions: `chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys`
 
 ### Loop exits immediately

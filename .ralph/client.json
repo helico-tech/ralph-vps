@@ -1,0 +1,10 @@
+{
+  "nodes": {
+    "vps": {
+      "host": "168.119.163.82",
+      "user": "ralph",
+      "port": 22,
+      "identityFile": "/Users/avanwieringen/.ssh/id_ed25519_helico"
+    }
+  }
+}

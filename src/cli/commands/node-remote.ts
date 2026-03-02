@@ -111,10 +111,19 @@ export function registerNodeRemoteCommands(
     .option("--git-name <name>", "Git user name")
     .option("--git-email <email>", "Git user email")
     .option("--api-key <key>", "Anthropic API key")
+    .requiredOption(
+      "--ralph-repo <url>",
+      "Git URL of the Ralph repository to clone on the node"
+    )
     .action(
       async (
         node: string,
-        opts: { gitName?: string; gitEmail?: string; apiKey?: string }
+        opts: {
+          gitName?: string;
+          gitEmail?: string;
+          apiKey?: string;
+          ralphRepo: string;
+        }
       ) => {
         const executor = new SshRemoteExecutor(clientConfig);
 
@@ -151,20 +160,8 @@ export function registerNodeRemoteCommands(
             command: ["which", "ralph"],
           });
           if (ralphCheck.exitCode !== 0) {
-            // Get origin URL from local repo
-            const localOrigin = Bun.spawnSync(
-              ["git", "remote", "get-url", "origin"],
-              { stdout: "pipe", stderr: "pipe" }
-            );
-            const ralphRepoUrl = localOrigin.stdout.toString().trim();
-            if (!ralphRepoUrl) {
-              throw new RemoteError(
-                "Cannot determine Ralph repo URL — no git remote 'origin' found",
-                node
-              );
-            }
-
-            console.log(`Installing Ralph from ${ralphRepoUrl}...`);
+            console.log(`Installing Ralph from ${opts.ralphRepo}...`);
+            const ralphRepoUrl = opts.ralphRepo;
             await runOrFail(
               executor,
               {
