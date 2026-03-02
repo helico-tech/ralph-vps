@@ -96,6 +96,8 @@ ufw enable
 
 ## 3. Install Dependencies
 
+> **Automated alternative**: After setting up your client (section 7), you can run `ralph node setup my-vps --git-name "Ralph Bot" --git-email "ralph@yourdomain.com" --api-key "sk-ant-..."` to install Bun, Ralph, configure git, and set the API key in one shot. System packages (3.1) and Claude Code CLI (3.3) still need manual install.
+
 SSH in as `ralph`:
 
 ```bash
@@ -168,7 +170,71 @@ git config --global user.name "Ralph Bot"
 git config --global user.email "ralph@yourdomain.com"
 ```
 
-## 4. Set Up the API Key
+## 4. Set Up GitHub SSH Access
+
+The VPS needs to pull and push to your private repos. A **deploy key** is the right approach — it's scoped to a single repo, no GitHub account credentials on the VPS.
+
+> **Automated alternative**: `ralph node deploy-key my-vps` generates the key, prints it with GitHub instructions, and accepts the host key — all from your local machine.
+
+### 4.1 Generate an SSH Key on the VPS
+
+```bash
+ssh-keygen -t ed25519 -C "ralph@your-vps" -f ~/.ssh/id_ed25519 -N ""
+```
+
+### 4.2 Add as Deploy Key on GitHub
+
+Copy the public key:
+
+```bash
+cat ~/.ssh/id_ed25519.pub
+```
+
+Then in your repo on GitHub: **Settings → Deploy keys → Add deploy key**
+- Title: `ralph-vps`
+- Key: paste the public key
+- Check **Allow write access** (Ralph needs to push task state)
+
+### 4.3 Accept GitHub's Host Key
+
+```bash
+ssh -T git@github.com
+# Type "yes" to accept the fingerprint
+# You should see: "Hi <repo>! You've successfully authenticated..."
+```
+
+### 4.4 Multiple Repos
+
+Deploy keys are per-repo. If you run multiple projects, you need a key per repo and an SSH config to match them:
+
+```bash
+# Generate a second key
+ssh-keygen -t ed25519 -C "ralph@your-vps/project-b" -f ~/.ssh/id_ed25519_project_b -N ""
+```
+
+Add to `~/.ssh/config`:
+
+```
+Host github-project-a
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/id_ed25519
+
+Host github-project-b
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/id_ed25519_project_b
+```
+
+Then clone using the host alias:
+
+```bash
+git clone github-project-b:you/project-b.git
+```
+
+> **Alternative**: If you run many repos, adding the VPS key to a GitHub account (Settings → SSH keys) is simpler — one key, all repos that account can access. Trade-off is a bigger blast radius.
+
+## 5. Set Up the API Key
 
 The Claude CLI needs authentication when `ralph loop run` spawns it inside tmux. Add to `~/.bashrc`:
 
@@ -179,9 +245,11 @@ echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.bashrc
 > tmux inherits the environment of the shell that launches it, so `.bashrc` works.
 > If you use `.profile` instead, make sure tmux sessions pick it up.
 
-## 5. Set Up a Project on the VPS
+## 6. Set Up a Project on the VPS
 
-### 5.1 Clone Your Project
+> **Automated alternative**: `ralph node clone my-vps git@github.com:you/your-project.git` clones the repo, runs `ralph init project`, and `ralph sync` in one command. Then use `ralph node projects my-vps` to verify it's listed.
+
+### 6.1 Clone Your Project
 
 ```bash
 mkdir -p ~/projects
@@ -190,9 +258,7 @@ git clone git@github.com:you/your-project.git
 cd your-project
 ```
 
-> Make sure the VPS has SSH key access to your git remote. Either generate a deploy key on the VPS (`ssh-keygen -t ed25519`) and add it to GitHub, or use HTTPS with a token.
-
-### 5.2 Initialize Ralph
+### 6.2 Initialize Ralph
 
 ```bash
 ralph init project my-project
@@ -208,7 +274,7 @@ This creates:
   logs/                 # Iteration logs (gitignored)
 ```
 
-### 5.3 Sync Built-in Task Types
+### 6.3 Sync Built-in Task Types
 
 ```bash
 ralph sync
@@ -216,7 +282,7 @@ ralph sync
 
 Copies the built-in prompt templates (`feature-dev`, `bug-fix`, `research`, `review`) to `.ralph/types/`.
 
-### 5.4 Commit the Ralph Config
+### 6.4 Commit the Ralph Config
 
 ```bash
 git add .ralph/
@@ -224,7 +290,7 @@ git commit -m "Initialize Ralph project config"
 git push
 ```
 
-## 6. Set Up Your Local Machine (Client)
+## 7. Set Up Your Local Machine (Client)
 
 On your local machine, in the same project repo:
 
@@ -255,7 +321,27 @@ Test the connection:
 ralph remote my-vps version
 ```
 
-## 7. Workflow
+### Automated Node Setup
+
+Once your client is configured and system packages are installed (step 3.1), you can bootstrap the entire VPS from your local machine:
+
+```bash
+# 1. Generate deploy key and get GitHub instructions
+ralph node deploy-key my-vps
+
+# 2. (Manual) Add the printed public key to GitHub as a deploy key
+
+# 3. Install Bun, Ralph, configure git and API key
+ralph node setup my-vps --git-name "Ralph Bot" --git-email "ralph@yourdomain.com" --api-key "sk-ant-..."
+
+# 4. Clone a project and initialize Ralph
+ralph node clone my-vps git@github.com:you/your-project.git
+
+# 5. Verify
+ralph node projects my-vps
+```
+
+## 8. Workflow
 
 ### Add a task (locally)
 
@@ -292,7 +378,7 @@ ralph remote my-vps loop attach     # Live tmux session (Ctrl+B, D to detach)
 ralph remote my-vps loop stop
 ```
 
-## 8. Circuit Breaker Configuration
+## 9. Circuit Breaker Configuration
 
 Edit `.ralph/project.json` to tune safety limits:
 
@@ -319,7 +405,7 @@ Edit `.ralph/project.json` to tune safety limits:
 
 Set `maxCostUsd` on a VPS. You don't want a runaway loop burning through your API credits while you sleep. 💸
 
-## 9. Multiple Projects
+## 10. Multiple Projects
 
 Each project gets its own tmux session (`ralph-<project-name>`). To run multiple projects:
 
@@ -330,7 +416,7 @@ cd ~/projects/project-b && ralph loop start
 
 They run independently. Monitor each with `ralph loop status` from the respective directory.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 ### "claude: command not found" in tmux
 

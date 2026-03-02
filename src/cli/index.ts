@@ -7,6 +7,7 @@ import { registerTaskCommands } from "./commands/task";
 import { registerLoopCommands } from "./commands/loop";
 import { registerRemoteCommands } from "./commands/remote";
 import { registerNodeCommands } from "./commands/node";
+import { registerNodeRemoteCommands } from "./commands/node-remote";
 import { registerSyncCommand } from "./commands/sync";
 import { registerLogCommands } from "./commands/log";
 import { registerMigrateCommand } from "./commands/migrate";
@@ -43,7 +44,8 @@ export async function createProgram(): Promise<Command> {
     const clientConfig = await configProvider.loadClientConfig(projectRoot);
     if (clientConfig) {
       registerRemoteCommands(program, clientConfig);
-      registerNodeCommands(program, projectRoot);
+      const nodeCmd = registerNodeCommands(program, projectRoot);
+      registerNodeRemoteCommands(nodeCmd, clientConfig);
     }
   }
 

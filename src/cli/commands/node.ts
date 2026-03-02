@@ -5,7 +5,7 @@ import { CLIENT_CONFIG_FILE } from "../../constants";
 export function registerNodeCommands(
   program: Command,
   projectRoot: string
-): void {
+): Command {
   const node = program
     .command("node")
     .description("Manage remote nodes");
@@ -88,4 +88,6 @@ export function registerNodeCommands(
       await Bun.write(configPath, JSON.stringify(config, null, 2));
       console.log(`Removed node "${name}"`);
     });
+
+  return node;
 }
