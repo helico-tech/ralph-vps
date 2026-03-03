@@ -138,6 +138,12 @@ export interface BudgetLimits {
   per_task_usd: number;
 }
 
+// Task location — for consistency checks and repository scanning
+export interface TaskLocation {
+  task: Task;
+  directory: TaskStatus;
+}
+
 // Consistency check results
 export interface ConsistencyIssue {
   type: "orphaned_active" | "duplicate_id" | "missing_branch" | "invalid_status";
