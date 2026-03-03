@@ -1,0 +1,26 @@
+{
+  "name": "ralph-vps",
+  "version": "0.1.0",
+  "description": "Autonomous coding agent that executes tasks from a git-based queue using Claude Code",
+  "type": "module",
+  "bin": {
+    "ralph": "src/cli.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun build src/cli.ts --outdir dist --target node",
+    "test": "bun test",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.7.0"
+  },
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}

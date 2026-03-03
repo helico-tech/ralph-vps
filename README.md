@@ -72,17 +72,16 @@ Ralph runs in two places. Install differently depending on where you are.
 ### Install Ralph (on your laptop)
 
 ```sh
-# Install globally
-bun install -g ralph-vps
+# Clone the repo
+git clone https://github.com/helico/ralph-vps.git
+cd ralph-vps
+bun install
+
+# Link globally so `ralph` is available everywhere
+bun link
 
 # Verify
 ralph --version
-```
-
-Or use it without installing globally:
-
-```sh
-bunx ralph-vps task create --title "Fix the bug"
 ```
 
 This gives you the client commands: `ralph task`, `ralph status`, `ralph review`, `ralph doctor`. Your laptop never runs Claude — it just manages the task queue through git.
@@ -171,8 +170,11 @@ curl -fsSL https://bun.sh/install | bash
 # Install Claude Code
 npm install -g @anthropic-ai/claude-code
 
-# Install Ralph
-bun install -g ralph-vps
+# Clone and link Ralph
+git clone https://github.com/helico/ralph-vps.git /opt/ralph-vps
+cd /opt/ralph-vps
+bun install
+bun link
 ```
 
 **2. Set up environment**
