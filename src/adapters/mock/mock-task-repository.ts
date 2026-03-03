@@ -2,6 +2,7 @@
 
 import type { Task, TaskStatus, TaskLocation } from "../../core/types.js";
 import type { TaskRepository } from "../../ports/task-repository.js";
+import { TaskError, ERROR_CODES } from "../../core/errors.js";
 
 export class MockTaskRepository implements TaskRepository {
   private readonly tasks = new Map<string, { task: Task; directory: TaskStatus }>();
@@ -29,5 +30,12 @@ export class MockTaskRepository implements TaskRepository {
       task: { ...e.task },
       directory: e.directory,
     }));
+  }
+
+  async create(task: Task): Promise<void> {
+    if (this.tasks.has(task.id)) {
+      throw new TaskError(ERROR_CODES.DUPLICATE_ID, `Task '${task.id}' already exists`);
+    }
+    this.tasks.set(task.id, { task: { ...task, status: "pending" }, directory: "pending" });
   }
 }

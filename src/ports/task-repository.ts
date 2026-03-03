@@ -20,4 +20,7 @@ export interface TaskRepository {
 
   /** Return every task paired with its on-disk status directory. */
   locateAll(): Promise<TaskLocation[]>;
+
+  /** Create a new task in the pending directory. Throws on duplicate ID. */
+  create(task: Task): Promise<void>;
 }

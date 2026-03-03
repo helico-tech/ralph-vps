@@ -34,4 +34,10 @@ export interface SourceControl {
 
   /** List all local and remote branch names. */
   listBranches(): Promise<string[]>;
+
+  /** Merge a branch into the current branch. Defaults to --no-ff. */
+  merge(branch: string, options?: { ffOnly?: boolean }): Promise<void>;
+
+  /** Get the last commit on the current branch. Returns null if no commits. */
+  lastCommit(): Promise<{ sha: string; timestamp: string; message: string } | null>;
 }

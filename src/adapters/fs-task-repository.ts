@@ -6,6 +6,7 @@ import { readdir, unlink, mkdir } from "fs/promises";
 import type { Task, TaskStatus, TaskLocation } from "../core/types.js";
 import type { TaskRepository } from "../ports/task-repository.js";
 import { parseTaskFile, serializeTaskFile } from "../core/task-file.js";
+import { TaskError, ERROR_CODES } from "../core/errors.js";
 
 const STATUSES: TaskStatus[] = ["pending", "active", "review", "done", "failed"];
 
@@ -46,6 +47,17 @@ export class FsTaskRepository implements TaskRepository {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
+  }
+
+  async create(task: Task): Promise<void> {
+    const existing = await this.findById(task.id);
+    if (existing) {
+      throw new TaskError(ERROR_CODES.DUPLICATE_ID, `Task '${task.id}' already exists`);
+    }
+    const destDir = join(this.basePath, "pending");
+    await mkdir(destDir, { recursive: true });
+    const content = serializeTaskFile({ ...task, status: "pending" });
+    await Bun.write(join(destDir, `${task.id}.md`), content);
   }
 
   async locateAll(): Promise<TaskLocation[]> {

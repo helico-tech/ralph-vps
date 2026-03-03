@@ -78,6 +78,22 @@ export class GitSourceControl implements SourceControl {
     return stdout.split("\n").filter(Boolean);
   }
 
+  async merge(branch: string, options?: { ffOnly?: boolean }): Promise<void> {
+    const flag = options?.ffOnly ? "--ff-only" : "--no-ff";
+    await this.git("merge", flag, branch, "-m", `Merge branch '${branch}'`);
+  }
+
+  async lastCommit(): Promise<{ sha: string; timestamp: string; message: string } | null> {
+    try {
+      const { stdout } = await this.git("log", "-1", "--format=%H%n%aI%n%s");
+      const lines = stdout.split("\n");
+      if (!lines[0]) return null;
+      return { sha: lines[0], timestamp: lines[1], message: lines[2] };
+    } catch {
+      return null;
+    }
+  }
+
   // --- Private ---
 
   private async git(...args: string[]): Promise<{ stdout: string; stderr: string }> {

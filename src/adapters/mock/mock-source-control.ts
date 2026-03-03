@@ -8,14 +8,25 @@ export class MockSourceControl implements SourceControl {
   readonly branches: string[] = [];
   readonly checkouts: string[] = [];
   readonly deletedBranches: string[] = [];
+  readonly mergedBranches: string[] = [];
   stageTrackedCalls = 0;
   private _pushFails = false;
+  private _mergeFails = false;
   private _commitHash = "abc1234";
   private _changedFiles: string[] = [];
+  private _lastCommit: { sha: string; timestamp: string; message: string } | null = {
+    sha: "abc1234",
+    timestamp: "2026-03-03T12:00:00Z",
+    message: "test commit",
+  };
 
   setPushFails(fails: boolean): void { this._pushFails = fails; }
+  setMergeFails(fails: boolean): void { this._mergeFails = fails; }
   setCommitHash(hash: string): void { this._commitHash = hash; }
   setChangedFiles(files: string[]): void { this._changedFiles = files; }
+  setLastCommit(commit: { sha: string; timestamp: string; message: string } | null): void {
+    this._lastCommit = commit;
+  }
 
   async pull(): Promise<void> {}
 
@@ -39,4 +50,13 @@ export class MockSourceControl implements SourceControl {
   }
 
   async listBranches(): Promise<string[]> { return [...this.branches]; }
+
+  async merge(branch: string, _options?: { ffOnly?: boolean }): Promise<void> {
+    if (this._mergeFails) throw new Error("merge conflict");
+    this.mergedBranches.push(branch);
+  }
+
+  async lastCommit(): Promise<{ sha: string; timestamp: string; message: string } | null> {
+    return this._lastCommit ? { ...this._lastCommit } : null;
+  }
 }
