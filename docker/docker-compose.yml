@@ -1,0 +1,11 @@
+services:
+  ralph:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    volumes:
+      # Mount the target project repository (PROJECT_PATH must be set in .env)
+      - ${PROJECT_PATH}:/workspace
+    env_file:
+      - .env

@@ -1,0 +1,38 @@
+[Unit]
+Description=Ralph — Autonomous coding agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ralph
+Group=ralph
+
+# Working directory is the target project repo
+WorkingDirectory=/home/ralph/project
+ExecStart=/usr/local/bin/bun run /opt/ralph/src/cli.ts start
+
+# Environment
+EnvironmentFile=/etc/ralph/env
+
+# Restart on failure with 10s delay
+Restart=on-failure
+RestartSec=10
+
+# Graceful shutdown — SIGTERM triggers the shutdown handler
+KillSignal=SIGTERM
+TimeoutStopSec=120
+
+# Logging to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ralph
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ralph/project /home/ralph/.ssh /home/ralph/.config
+
+[Install]
+WantedBy=multi-user.target
