@@ -71,6 +71,7 @@ function makeDeps(overrides: Partial<OrchestratorDeps> = {}): TestDeps {
     obs,
     config: TEST_CONFIG,
     templatesDir,
+    tasksDir: ".ralph/tasks",
     ...overrides,
   } as TestDeps;
 }
@@ -109,8 +110,9 @@ describe("processTask — happy path", () => {
 
     await processTask(deps, task);
 
-    // stageTrackedCalls should be > 0 (at least claim + work + review)
-    expect(deps.git.stageTrackedCalls).toBeGreaterThanOrEqual(3);
+    // Task transitions should stage the tasks directory
+    expect(deps.git.staged.length).toBeGreaterThanOrEqual(2); // claim + review transitions
+    expect(deps.git.staged[0]).toEqual([".ralph/tasks"]);
   });
 
   it("emits events in correct order", async () => {

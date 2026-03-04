@@ -26,7 +26,10 @@ export interface SourceControl {
   /** Stage all tracked file modifications (git add -u). No untracked files. */
   stageTracked(): Promise<void>;
 
-  /** Return list of changed files relative to HEAD. */
+  /** Stage all changes including untracked files (git add -A). */
+  stageAll(): Promise<void>;
+
+  /** Return list of changed files relative to HEAD, including untracked. */
   changedFiles(): Promise<string[]>;
 
   /** Delete a local branch. Optionally delete the remote tracking branch too. */

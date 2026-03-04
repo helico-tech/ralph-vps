@@ -78,7 +78,7 @@ program
       const executor = new ClaudeCliExecutor();
       const verifier = new ShellVerifier(cwd);
 
-      const deps = { repo, git, executor, verifier, obs, config, templatesDir: join(cwd, ".ralph", "templates") };
+      const deps = { repo, git, executor, verifier, obs, config, templatesDir: join(cwd, ".ralph", "templates"), tasksDir: ".ralph/tasks" };
 
       registerShutdownHandlers();
       await recoverOrphanedTasks(deps);

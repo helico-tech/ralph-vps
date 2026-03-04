@@ -15,11 +15,11 @@ export class MockExecutor implements AgentExecutor {
   readonly calls: ExecutionPlan[] = [];
 
   constructor(
-    private readonly result: ExecutionResult | ((plan: ExecutionPlan) => ExecutionResult) = DEFAULT_RESULT
+    private readonly result: ExecutionResult | ((plan: ExecutionPlan) => ExecutionResult | Promise<ExecutionResult>) = DEFAULT_RESULT
   ) {}
 
   async execute(plan: ExecutionPlan): Promise<ExecutionResult> {
     this.calls.push(plan);
-    return typeof this.result === "function" ? this.result(plan) : { ...this.result };
+    return typeof this.result === "function" ? await this.result(plan) : { ...this.result };
   }
 }

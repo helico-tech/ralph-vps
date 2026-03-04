@@ -40,8 +40,8 @@ export async function recoverOrphanedTasks(deps: OrchestratorDeps): Promise<void
     }
   }
 
-  // One atomic commit for all recovered tasks
-  await git.stageTracked();
+  // One atomic commit for all recovered tasks — stage only task files, not working tree debris
+  await git.stageFiles([deps.tasksDir]);
   await git.commit(
     `ralph: crash recovery — ${recovered.length} task(s) returned to queue`,
   );

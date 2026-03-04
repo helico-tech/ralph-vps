@@ -51,13 +51,19 @@ export class GitSourceControl implements SourceControl {
     await this.git("add", "-u");
   }
 
+  async stageAll(): Promise<void> {
+    await this.git("add", "-A");
+  }
+
   async changedFiles(): Promise<string[]> {
-    // Both staged and unstaged changes relative to HEAD
+    // Staged + unstaged + untracked files
     const { stdout: unstaged } = await this.git("diff", "--name-only", "HEAD");
     const { stdout: staged } = await this.git("diff", "--cached", "--name-only");
+    const { stdout: untracked } = await this.git("ls-files", "--others", "--exclude-standard");
     const all = new Set([
       ...unstaged.split("\n").filter(Boolean),
       ...staged.split("\n").filter(Boolean),
+      ...untracked.split("\n").filter(Boolean),
     ]);
     return [...all];
   }

@@ -10,6 +10,7 @@ export class MockSourceControl implements SourceControl {
   readonly deletedBranches: string[] = [];
   readonly mergedBranches: string[] = [];
   stageTrackedCalls = 0;
+  stageAllCalls = 0;
   private _pushFails = false;
   private _mergeFails = false;
   private _commitHash = "abc1234";
@@ -43,10 +44,13 @@ export class MockSourceControl implements SourceControl {
 
   async stageFiles(paths: string[]): Promise<void> { this.staged.push([...paths]); }
   async stageTracked(): Promise<void> { this.stageTrackedCalls++; }
+  async stageAll(): Promise<void> { this.stageAllCalls++; }
   async changedFiles(): Promise<string[]> { return [...this._changedFiles]; }
 
   async deleteBranch(name: string, _options?: { remote?: boolean }): Promise<void> {
     this.deletedBranches.push(name);
+    const idx = this.branches.indexOf(name);
+    if (idx !== -1) this.branches.splice(idx, 1);
   }
 
   async listBranches(): Promise<string[]> { return [...this.branches]; }

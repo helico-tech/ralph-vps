@@ -21,20 +21,21 @@ export interface OrchestratorDeps {
   obs: Observability;
   config: RalphConfig;
   templatesDir: string;
+  tasksDir: string; // relative to git root, e.g. ".ralph/tasks"
   pollIntervalMs?: number;
 }
 
 const SKIP_VERIFY_REASONS = new Set(["refusal", "timeout", "error"]);
 
 export async function processTask(deps: OrchestratorDeps, task: Task): Promise<void> {
-  const { repo, git, executor, verifier, obs, config, templatesDir } = deps;
+  const { repo, git, executor, verifier, obs, config, templatesDir, tasksDir } = deps;
   const now = () => new Date().toISOString();
   const branchName = `${config.git.branch_prefix}${task.id}`;
 
   // --- CLAIM ---
   const claimed = transitionTask(task, "active", now());
   await repo.transition(claimed, "pending", "active");
-  await git.stageTracked();
+  await git.stageFiles([tasksDir]);
   await git.commit(`ralph(${task.id}): claimed`);
 
   const pushed = await git.push();
@@ -42,7 +43,7 @@ export async function processTask(deps: OrchestratorDeps, task: Task): Promise<v
     // Push conflict — another instance claimed, or we're behind. Revert and push.
     const reverted = transitionTask(claimed, "pending", now());
     await repo.transition(reverted, "active", "pending");
-    await git.stageTracked();
+    await git.stageFiles([tasksDir]);
     await git.commit(`ralph(${task.id}): claim reverted — push conflict`);
     try { await git.push(); } catch { /* best effort — next pull will reconcile */ }
     return;
@@ -105,9 +106,9 @@ export async function processTask(deps: OrchestratorDeps, task: Task): Promise<v
     // --- TRANSITION ---
     if (passed) {
       // Commit agent work on feature branch and push it
-      await git.stageTracked();
       const changed = await git.changedFiles();
       if (changed.length > 0) {
+        await git.stageAll();
         await git.commit(`ralph(${task.id}): work complete`);
       }
       await git.pushBranch(branchName);
@@ -123,7 +124,7 @@ export async function processTask(deps: OrchestratorDeps, task: Task): Promise<v
         branch: branchName,
       };
       await repo.transition(completed, "active", "review");
-      await git.stageTracked();
+      await git.stageFiles([tasksDir]);
       await git.commit(`ralph(${task.id}): completed — awaiting review`);
       await git.push();
 
@@ -153,7 +154,7 @@ async function failTask(
   task: Task,
   reason: string,
 ): Promise<void> {
-  const { repo, git, obs, config } = deps;
+  const { repo, git, obs, config, tasksDir } = deps;
   const now = new Date().toISOString();
   const branchName = `${config.git.branch_prefix}${task.id}`;
 
@@ -162,7 +163,7 @@ async function failTask(
   const updated = transitionTask(task, target, now);
 
   await repo.transition(updated, "active", target);
-  await git.stageTracked();
+  await git.stageFiles([tasksDir]);
   await git.commit(`ralph(${task.id}): ${canRetry ? "retrying" : "failed"} — ${reason}`);
   await git.push();
 

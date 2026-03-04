@@ -50,6 +50,7 @@ function makeDeps(overrides: Partial<OrchestratorDeps> = {}): OrchestratorDeps &
     verifier: new MockVerifier(),
     config: TEST_CONFIG,
     templatesDir: "/tmp/templates",
+    tasksDir: ".ralph/tasks",
     ...overrides,
   } as OrchestratorDeps & { repo: MockTaskRepository; git: MockSourceControl; obs: MockObservability };
 }
