@@ -1,39 +1,12 @@
-# Bugfix: {{title}}
-
-**ID:** {{id}}
-**Type:** bugfix
-**Author:** {{author}}
-
-## Bug Description
+# Bugfix — {{id}}
 
 {{description}}
 
-## Acceptance Criteria
+## Workflow
 
-{{#acceptance_criteria}}
-- {{.}}
-{{/acceptance_criteria}}
-
-## Files to Focus On
-
-{{#files}}
-- {{.}}
-{{/files}}
-
-## Constraints
-
-{{#constraints}}
-- {{.}}
-{{/constraints}}
-
-## Bugfix Workflow
-
-Follow this workflow strictly:
-
-1. **Understand the bug.** Read the description and relevant files. Identify the root cause before writing any code.
-2. **Write a failing test first.** Create a test that reproduces the bug. Run the test suite to confirm it fails.
-3. **Fix the bug.** Make the minimal change necessary to fix the root cause. Avoid fixing symptoms — address the underlying problem.
-4. **Verify the fix.** Run the full test suite. The new test should pass, and no existing tests should break.
-5. **Review your change.** Ensure you haven't introduced new problems. Keep the diff minimal — only change what's necessary.
-6. Stage only the files you changed. Never use `git add -A` or `git add .`.
-7. Commit with the message format: `ralph({{id}}): fix <brief description>`.
+1. **Understand the bug.** Read the description above and the relevant source files. Identify the root cause before writing any code — do not guess.
+2. **Write a failing test.** Create a test that reproduces the bug. Run the suite to confirm it fails as expected.
+3. **Fix the root cause.** Make the minimal change necessary. Fix the underlying problem, not the symptom. Avoid touching unrelated code.
+4. **Verify.** Run the full test suite. Your new test should pass. No existing tests should break.
+5. **Review your diff.** Ensure you haven't introduced new problems. The diff should be minimal and focused.
+6. **Commit.** Stage only the files you changed (never `git add -A` or `git add .`). Commit with message: `ralph({{id}}): fix <brief description>`.

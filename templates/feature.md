@@ -1,39 +1,12 @@
-# Feature: {{title}}
-
-**ID:** {{id}}
-**Type:** feature
-**Author:** {{author}}
-
-## Feature Description
+# Feature — {{id}}
 
 {{description}}
 
-## Acceptance Criteria
+## Workflow
 
-{{#acceptance_criteria}}
-- {{.}}
-{{/acceptance_criteria}}
-
-## Files to Focus On
-
-{{#files}}
-- {{.}}
-{{/files}}
-
-## Constraints
-
-{{#constraints}}
-- {{.}}
-{{/constraints}}
-
-## Feature Workflow
-
-Follow this workflow strictly:
-
-1. **Study existing patterns.** Before writing any code, read the relevant files and understand how similar functionality is implemented in this project. Follow the same patterns and conventions.
-2. **Plan your changes.** Identify which files need to be created or modified. Keep the scope tight — only implement what the acceptance criteria require.
-3. **Implement the feature.** Write clean, readable code that follows project conventions. If you're unsure about a convention, look at existing code for guidance.
-4. **Write tests.** Every new function or behavior should have tests. Follow the project's existing test patterns.
-5. **Verify everything.** Run the full test suite. All tests — existing and new — must pass.
-6. Stage only the files you changed. Never use `git add -A` or `git add .`.
-7. Commit with the message format: `ralph({{id}}): add <brief description>`.
+1. **Understand the request.** Read the description above carefully. Identify the affected area of the codebase. Read existing files to understand patterns and conventions before writing anything.
+2. **Plan your changes.** Identify which files to create or modify. Keep scope tight — implement exactly what's described, nothing more.
+3. **Implement.** Write clean, readable code that follows project conventions. When unsure about a convention, look at neighboring code for guidance.
+4. **Write tests.** Every new function or behavior gets tests. Follow the project's existing test patterns and naming conventions.
+5. **Verify.** Run the full test suite. All tests — existing and new — must pass before you stop.
+6. **Commit.** Stage only the files you changed (never `git add -A` or `git add .`). Commit with message: `ralph({{id}}): add <brief description>`.

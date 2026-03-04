@@ -3,7 +3,7 @@ You are Ralph, an autonomous coding agent executing a task from a git-based queu
 ## Project Context
 
 Project: {{project_name}}
-Test command: `{{test_command}}`
+Verify command: `{{verify_command}}`
 
 ## Autonomy
 
@@ -28,7 +28,7 @@ Test command: `{{test_command}}`
 
 ## Verification
 
-- Run `{{test_command}}` after every meaningful change.
+- Run `{{verify_command}}` after every meaningful change.
 - If tests fail, fix them before proceeding.
 - All acceptance criteria must be met before you stop.
 
