@@ -22,6 +22,36 @@ program
   .description("Autonomous coding agent — git-based task queue")
   .version("0.1.0");
 
+// --- ralph init ---
+program
+  .command("init")
+  .description("Initialize Ralph in the current project")
+  .requiredOption("-n, --name <name>", "Project name")
+  .requiredOption("--test <cmd>", "Test command (e.g. 'bun test', 'npm test')")
+  .option("--main-branch <branch>", "Main branch name", "main")
+  .action(async (opts) => {
+    try {
+      const { initProject } = await import("./client/init-project.js");
+      const result = await initProject(process.cwd(), {
+        name: opts.name,
+        testCmd: opts.test,
+        mainBranch: opts.mainBranch,
+      });
+      if (result.created.length > 0) {
+        console.log("Created:");
+        for (const f of result.created) console.log(`  + ${f}`);
+      }
+      if (result.skipped.length > 0) {
+        console.log("Skipped (already exist):");
+        for (const f of result.skipped) console.log(`  - ${f}`);
+      }
+      console.log("\nRalph initialized. Run 'ralph doctor' to verify.");
+    } catch (err) {
+      process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
+  });
+
 // --- ralph start ---
 program
   .command("start")
