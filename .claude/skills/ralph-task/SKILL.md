@@ -5,50 +5,88 @@ description: Create a new Ralph task. Use when the user wants to create, add, or
 
 # Create Ralph Task
 
-Guide the user through creating a task for Ralph's autonomous execution queue.
+Guide the user through creating a high-quality, well-specified task for Ralph's autonomous execution queue.
 
 ## Instructions
 
-### Step 1: Gather task details
+### Step 1: Extract initial context
 
-Ask the user for the following. Only **title** is required — provide sensible defaults for the rest.
+Parse the user's message to extract as much as possible:
+- Task intent (what needs to be done)
+- Task type (feature / bugfix / refactor / research / test / chore) — infer from language ("fix" = bugfix, "add" = feature, "refactor"/"clean up" = refactor, etc.)
+- Priority hint ("urgent", "low priority", etc.)
+- Any mentioned files or components
 
-| Field | Required | Default | Notes |
-|-------|----------|---------|-------|
-| Title | Yes | — | Short, actionable description |
-| Type | No | `feature` | One of: `feature`, `bugfix`, `refactor`, `research`, `test`, `chore` |
-| Priority | No | `100` | Lower number = higher priority |
-| Description | No | `""` | Detailed explanation of what needs to be done |
-| Author | No | — | Who requested this task |
+If the message is a single vague sentence, proceed to Step 2. If it contains enough detail (clear what, why, and how to verify), skip to Step 3.
 
-If the user provides everything in their initial message (e.g., "create a bugfix task to fix the login crash"), extract the details directly instead of asking.
+### Step 2: Clarify and enrich
 
-### Step 2: Create the task
+Ask these questions **in one message** (don't ask one at a time):
 
-Run the CLI command:
+1. **Expected behavior**: "What should happen after this is done? How would you verify it works?"
+2. **Affected files/components**: "Which parts of the codebase does this touch? Any specific files?"
+3. **Constraints**: "Any technical constraints? (e.g., don't change the public API, must work without new dependencies)"
 
-```bash
-ralph task create --title "<title>" [--type <type>] [--priority <priority>] [--description "<description>"] [--author "<author>"]
+While asking, **search the codebase** to suggest relevant files:
+
+- Run 2-3 targeted grep/glob searches based on the task topic
+- Include your findings in the question: "I found these potentially relevant files — do any of these apply? [list]"
+
+Convert the user's answer to the "Expected behavior" question into acceptance criteria. Each distinct verifiable outcome becomes one criterion.
+
+### Step 3: Determine task metadata
+
+| Field | Value |
+|-------|-------|
+| Title | Short, actionable (max ~60 chars). Start with a verb: "Add", "Fix", "Refactor", "Investigate" |
+| Type | Inferred from intent |
+| Priority | 100 default; 10-50 for urgent; 150+ for low priority |
+| Description | 2-4 sentences: what and why |
+| Author | Ask if not provided, or omit |
+
+### Step 4: Show preview and confirm
+
+Present the full task before creating it:
+
+```
+Title: <title>
+Type: <type> | Priority: <priority>
+Description: <description>
+
+Acceptance criteria:
+- <criterion 1>
+- <criterion 2>
+
+Files: <list or "none specified">
+Constraints: <list or "none">
 ```
 
-**Important:** Only include optional flags when the user provided a value. Do not pass empty strings — omit the flag entirely.
+Ask: "Does this look right? I'll create it once you confirm."
 
-### Step 3: Report the result
+If the user wants changes, update and show the preview again.
 
-Show the user the CLI output confirming the task was created. Include the generated task ID.
+### Step 5: Create the task
 
-If the command fails, show the error and suggest fixes:
+Run the CLI command with all collected fields:
+
+```bash
+ralph task create \
+  --title "<title>" \
+  --type <type> \
+  --priority <priority> \
+  --description "<description>" \
+  [--author "<author>"] \
+  [--criteria "<criterion 1>"] \
+  [--criteria "<criterion 2>"] \
+  [--files "<path1>"] \
+  [--files "<path2>"] \
+  [--constraints "<constraint1>"]
+```
+
+Only include flags where values were collected. `--criteria`, `--files`, and `--constraints` are repeatable — pass one flag per item.
+
+### Step 6: Report result
+
+Show the created task ID and confirm it was queued. If the command fails:
 - "Config file not found" — run `ralph doctor` to check setup
 - "Failed to push" — check git remote configuration
-
-## Examples
-
-**Simple task:**
-```bash
-ralph task create --title "Add user authentication"
-```
-
-**Detailed task:**
-```bash
-ralph task create --title "Fix null crash in auth handler" --type bugfix --priority 10 --description "The authenticate() function crashes when email is null" --author "Arjan"
-```

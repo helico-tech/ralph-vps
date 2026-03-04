@@ -22,6 +22,7 @@ export interface OrchestratorDeps {
   config: RalphConfig;
   templatesDir: string;
   tasksDir: string; // relative to git root, e.g. ".ralph/tasks"
+  systemPromptPath: string; // absolute path to ralph-system.md
   pollIntervalMs?: number;
 }
 
@@ -65,8 +66,11 @@ export async function processTask(deps: OrchestratorDeps, task: Task): Promise<v
 
     await git.createBranch(branchName);
 
-    const template = await loadTemplate(task.type, templatesDir);
-    const plan = buildExecutionPlan(task, template, config);
+    const [template, systemPromptTemplate] = await Promise.all([
+      loadTemplate(task.type, templatesDir),
+      Bun.file(deps.systemPromptPath).text(),
+    ]);
+    const plan = buildExecutionPlan(task, template, config, systemPromptTemplate);
 
     obs.emit({ type: "execution.started", task_id: task.id, timestamp: now(), model: plan.model });
 

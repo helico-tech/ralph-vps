@@ -50,7 +50,7 @@ export interface ExecutionPlan {
   max_turns: number;
   budget_usd: number;
   timeout_ms: number;
-  system_prompt_file: string;
+  system_prompt: string;
   permission_mode: string;
   working_directory: string;
 }

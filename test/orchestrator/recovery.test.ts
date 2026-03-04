@@ -51,6 +51,7 @@ function makeDeps(overrides: Partial<OrchestratorDeps> = {}): OrchestratorDeps &
     config: TEST_CONFIG,
     templatesDir: "/tmp/templates",
     tasksDir: ".ralph/tasks",
+    systemPromptPath: "/tmp/templates/ralph-system.md",
     ...overrides,
   } as OrchestratorDeps & { repo: MockTaskRepository; git: MockSourceControl; obs: MockObservability };
 }

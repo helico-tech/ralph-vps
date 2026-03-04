@@ -19,64 +19,82 @@ ralph task list --status review --json
 
 If no tasks are in review, tell the user and stop.
 
-If there's exactly one task, proceed with it. If multiple, show the list and ask the user which one to review.
+If there's exactly one task, proceed with it. If multiple, show the list and ask which one.
 
-### Step 2: Show the task details
+### Step 2: Show task details and execution metadata
 
-Read the task file to show the user what Ralph was asked to do:
+Read the task file:
 
 ```bash
 cat .ralph/tasks/review/<TASK-ID>.md
 ```
 
+Show the user:
+- Task title, description, and acceptance criteria
+- Execution metadata from the frontmatter:
+  - **Cost**: `cost_usd` (e.g., "$0.47")
+  - **Turns**: `turns`
+  - **Duration**: `duration_s` (format as "2m 14s")
+  - **Retries**: `retry_count` / `max_retries`
+  - **Branch**: `branch`
+
 ### Step 3: Show the diff
 
-First, read the project config to determine the main branch and branch prefix:
+Read the project config to get the main branch:
 
 ```bash
 cat .ralph/config.json
 ```
 
-Look for `git.main_branch` (default: `main`) and `git.branch_prefix` (default: `ralph/`). The task's JSON output also includes a `branch` field if set.
-
-Show the code changes Ralph made on the feature branch:
+Show the diff:
 
 ```bash
-git diff <main_branch>...<branch_prefix><TASK-ID>
+git diff <main_branch>...<branch>
 ```
 
-For example, with defaults: `git diff main...ralph/TASK-001`
+Summarize: files changed, lines added/removed, overall approach.
 
-Summarize the changes for the user — what files were modified, what was added/removed, and whether it looks correct.
+### Step 4: Evaluate against acceptance criteria
 
-### Step 4: Get the user's decision
+For each acceptance criterion from the task file, assess whether the diff satisfies it:
 
-Ask the user to **approve** or **reject** the task.
+- **Met** — the diff clearly addresses this criterion
+- **Partially met** — some aspects are addressed but not completely
+- **Not met** — no evidence of this criterion being addressed
 
-If rejecting, ask for a reason (optional — defaults to "no reason given").
+Example format:
+```
+✓ Login form validates email format — EmailInput adds regex check
+✓ Error message shown on failed login — AuthForm renders ErrorBanner
+✗ Password field masked — no changes to PasswordInput found
+```
 
-### Step 5: Execute the decision
+If any criterion is not met, flag it as grounds for rejection.
+
+### Step 5: Get the user's decision
+
+Present your evaluation summary and ask the user to **approve** or **reject**.
+
+If rejecting, ask for a reason (defaults to "criteria not met").
+
+### Step 6: Execute the decision
 
 **Approve:**
 ```bash
 ralph review <TASK-ID> --approve
 ```
 
-This merges the feature branch into main, moves the task to done, and deletes the branch.
-
 **Reject:**
 ```bash
 ralph review <TASK-ID> --reject --reason "<reason>"
 ```
 
-This moves the task back to pending (if retries remain) or to failed. The branch is deleted.
+### Step 7: Report result
 
-### Step 6: Report the result
-
-Show the CLI output confirming the action. If the task was rejected with retries remaining, let the user know Ralph will retry it automatically.
+Confirm the action. If rejected with retries remaining, note that Ralph will retry automatically.
 
 ## Error handling
 
-- **Merge conflict on approve** — Tell the user the merge failed and they need to resolve conflicts manually. The task stays in review.
+- **Merge conflict** — Tell the user the merge failed; they need to resolve manually. Task stays in review.
 - **Push failed** — Check git remote connectivity.
-- **Task not found** — The task ID may be wrong. Run `ralph task list --status review` to check.
+- **Task not found** — Run `ralph task list --status review` to verify the ID.

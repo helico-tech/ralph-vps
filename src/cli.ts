@@ -15,6 +15,10 @@ import { runDoctor } from "./doctor.js";
 import type { ClientDeps } from "./client/types.js";
 import type { TaskStatus, TaskType } from "./core/types.js";
 
+function collect(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
 const program = new Command();
 
 program
@@ -78,7 +82,12 @@ program
       const executor = new ClaudeCliExecutor();
       const verifier = new ShellVerifier(cwd);
 
-      const deps = { repo, git, executor, verifier, obs, config, templatesDir: join(cwd, ".ralph", "templates"), tasksDir: ".ralph/tasks" };
+      const deps = {
+        repo, git, executor, verifier, obs, config,
+        templatesDir: join(cwd, ".ralph", "templates"),
+        tasksDir: ".ralph/tasks",
+        systemPromptPath: join(cwd, ".ralph", "ralph-system.md"),
+      };
 
       registerShutdownHandlers();
       await recoverOrphanedTasks(deps);
@@ -100,6 +109,9 @@ taskCmd
   .option("--priority <n>", "Priority — lower is higher (default: 100)", "100")
   .option("-d, --description <text>", "Task description", "")
   .option("--author <name>", "Author name")
+  .option("--criteria <text>", "Acceptance criterion (repeatable)", collect, [] as string[])
+  .option("--files <path>", "File to focus on (repeatable)", collect, [] as string[])
+  .option("--constraints <text>", "Constraint (repeatable)", collect, [] as string[])
   .action(async (opts) => {
     try {
       const deps = await buildClientDeps();
@@ -109,6 +121,9 @@ taskCmd
         priority: parseInt(opts.priority, 10),
         description: opts.description,
         author: opts.author,
+        acceptance_criteria: opts.criteria.length ? opts.criteria : undefined,
+        files: opts.files.length ? opts.files : undefined,
+        constraints: opts.constraints.length ? opts.constraints : undefined,
       });
       console.log(`Created ${task.id}: ${task.title}`);
     } catch (err) {

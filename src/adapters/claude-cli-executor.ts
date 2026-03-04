@@ -1,5 +1,6 @@
 // Claude CLI executor — shells out to `claude` via Bun.spawn
 
+import { join } from "path";
 import type { AgentExecutor } from "../ports/agent-executor.js";
 import type { ExecutionPlan, ExecutionResult, StopReason } from "../core/types.js";
 import { ExecutionError, ERROR_CODES } from "../core/errors.js";
@@ -17,7 +18,7 @@ interface ClaudeJsonOutput {
 
 export class ClaudeCliExecutor implements AgentExecutor {
   async execute(plan: ExecutionPlan): Promise<ExecutionResult> {
-    const args = this.buildArgs(plan);
+    const { args, tempFile } = await this.buildArgs(plan);
     const startMs = Date.now();
 
     let stdout: string;
@@ -56,6 +57,10 @@ export class ClaudeCliExecutor implements AgentExecutor {
         ERROR_CODES.EXECUTION_FAILED,
         `Failed to spawn claude: ${(err as Error).message}`
       );
+    } finally {
+      if (tempFile) {
+        try { await Bun.file(tempFile).delete(); } catch { /* best effort cleanup */ }
+      }
     }
 
     // Signal-based kills
@@ -89,7 +94,7 @@ export class ClaudeCliExecutor implements AgentExecutor {
     };
   }
 
-  private buildArgs(plan: ExecutionPlan): string[] {
+  private async buildArgs(plan: ExecutionPlan): Promise<{ args: string[]; tempFile: string | null }> {
     const args: string[] = [
       "-p", plan.prompt,
       "--output-format", "json",
@@ -101,15 +106,18 @@ export class ClaudeCliExecutor implements AgentExecutor {
       args.push("--max-budget-usd", String(plan.budget_usd));
     }
 
-    if (plan.system_prompt_file) {
-      args.push("--append-system-prompt-file", plan.system_prompt_file);
+    let tempFile: string | null = null;
+    if (plan.system_prompt) {
+      tempFile = join(plan.working_directory, ".ralph", "system-prompt-active.md");
+      await Bun.write(tempFile, plan.system_prompt);
+      args.push("--append-system-prompt-file", tempFile);
     }
 
     if (plan.permission_mode === "skip_all") {
       args.push("--dangerously-skip-permissions");
     }
 
-    return args;
+    return { args, tempFile };
   }
 
   // Fix #4: Use output.subtype as authoritative signal instead of heuristic

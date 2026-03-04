@@ -13,10 +13,13 @@ import type { Task, RalphConfig, ExecutionResult, ExecutionPlan } from "../../sr
 import type { AgentExecutor } from "../../src/ports/agent-executor.js";
 
 let templatesDir: string;
+let systemPromptPath: string;
 
 beforeEach(async () => {
   templatesDir = await mkdtemp(join(tmpdir(), "ralph-tpl-"));
   await Bun.write(join(templatesDir, "default.md"), "Task: {{title}}\n\n{{description}}");
+  systemPromptPath = join(templatesDir, "ralph-system.md");
+  await Bun.write(systemPromptPath, "You are Ralph.");
 });
 
 afterEach(async () => {
@@ -72,6 +75,7 @@ function makeDeps(overrides: Partial<OrchestratorDeps> = {}): TestDeps {
     config: TEST_CONFIG,
     templatesDir,
     tasksDir: ".ralph/tasks",
+    systemPromptPath,
     ...overrides,
   } as TestDeps;
 }

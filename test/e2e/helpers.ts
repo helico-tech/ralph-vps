@@ -123,6 +123,7 @@ export async function createE2EEnv(
     config,
     templatesDir,
     tasksDir: ".ralph/tasks",
+    systemPromptPath: join(workDir, ".ralph", "ralph-system.md"),
   };
 
   return { remoteDir, workDir, deps };

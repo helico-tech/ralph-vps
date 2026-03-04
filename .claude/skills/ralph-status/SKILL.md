@@ -9,12 +9,13 @@ Show the current state of the Ralph task queue and system health.
 
 ## Instructions
 
-### Step 1: Fetch status
+### Step 1: Fetch status and config
 
-Run:
+Run both:
 
 ```bash
 ralph status --json
+cat .ralph/config.json
 ```
 
 ### Step 2: Check for errors
@@ -38,6 +39,12 @@ Format example:
 >
 > Last activity: 2 minutes ago — `ralph(TASK-007): work complete`
 
-### Step 4: Health inference
+### Step 4: Stuck detection
 
-If there is an active task but the last commit is older than 10 minutes, note that Ralph may be stuck or the task may be long-running.
+Read `task_defaults.timeout_seconds` from the config (default: 1800 seconds).
+
+If there is an active task and the last commit is older than `timeout_seconds`, warn that Ralph may be stuck:
+
+> Warning: TASK-007 has been active for 35 minutes but the configured timeout is 30 minutes. Ralph may be stuck or the task was interrupted.
+
+If the last commit is within the timeout, do not flag anything — the task is still within its expected execution window.

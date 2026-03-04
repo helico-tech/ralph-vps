@@ -26,39 +26,44 @@ export function buildPrompt(task: Task, template: string): string {
     : [DEFAULT_ACCEPTANCE];
   result = interpolateArray(result, "acceptance_criteria", criteria);
 
-  // Files
+  // Files — remove entire section when empty
   if (task.files?.length) {
     result = interpolateArray(result, "files", task.files);
   } else {
-    result = removeBlock(result, "files", "No specific files targeted.");
+    result = removeBlock(result, "files");
   }
 
-  // Constraints
+  // Constraints — remove entire section when empty
   if (task.constraints?.length) {
     result = interpolateArray(result, "constraints", task.constraints);
   } else {
-    result = removeBlock(result, "constraints", "");
+    result = removeBlock(result, "constraints");
   }
 
   return result.trim();
 }
 
 /**
- * Build a full execution plan from a task, template, and config.
- * Wraps buildPrompt and adds execution parameters.
+ * Build a full execution plan from a task, template, config, and system prompt template.
+ * Interpolates project context into the system prompt.
  */
 export function buildExecutionPlan(
   task: Task,
   template: string,
   config: RalphConfig,
+  systemPromptTemplate: string,
 ): ExecutionPlan {
+  const system_prompt = systemPromptTemplate
+    .replace(/\{\{project_name\}\}/g, config.project.name)
+    .replace(/\{\{test_command\}\}/g, config.verify.test);
+
   return {
     prompt: buildPrompt(task, template),
     model: config.task_defaults.model,
     max_turns: config.task_defaults.max_turns,
     budget_usd: config.task_defaults.max_budget_usd,
     timeout_ms: config.task_defaults.timeout_seconds * 1000,
-    system_prompt_file: ".ralph/ralph-system.md",
+    system_prompt,
     permission_mode: config.execution.permission_mode,
     working_directory: ".",
   };
@@ -93,20 +98,27 @@ function interpolateArray(template: string, name: string, items: string[]): stri
 }
 
 /**
- * Remove a {{#name}}...{{/name}} block or replace {{name}} with a fallback.
+ * Remove a {{#name}}...{{/name}} block entirely, including the preceding
+ * markdown heading (## ...) if present.
  */
-function removeBlock(template: string, name: string, fallback: string): string {
+function removeBlock(template: string, name: string): string {
+  // Try to strip the entire section: heading (any level) + newlines + block
+  const sectionRegex = new RegExp(
+    `(?:^|\n)#{1,6}[^\n]+\n+\\{\\{#${name}\\}\\}[\\s\\S]*?\\{\\{/${name}\\}\\}`,
+    "g"
+  );
+  const stripped = template.replace(sectionRegex, "");
+  if (stripped !== template) return stripped;
+
+  // No heading found — just remove the block itself
   const blockRegex = new RegExp(
     `\\{\\{#${name}\\}\\}[\\s\\S]*?\\{\\{/${name}\\}\\}`,
     "g"
   );
+  const blockStripped = template.replace(blockRegex, "");
+  if (blockStripped !== template) return blockStripped;
 
-  const replaced = template.replace(blockRegex, fallback);
-
-  if (replaced !== template) {
-    return replaced;
-  }
-
+  // Fallback: remove simple {{name}} variable
   const simpleRegex = new RegExp(`\\{\\{${name}\\}\\}`, "g");
-  return template.replace(simpleRegex, fallback);
+  return template.replace(simpleRegex, "");
 }

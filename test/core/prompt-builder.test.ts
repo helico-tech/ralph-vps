@@ -93,15 +93,18 @@ describe("buildPrompt", () => {
     expect(result).toContain("The described change works correctly and all tests pass");
   });
 
-  it("replaces files block with fallback when no files", () => {
+  it("removes entire files section when no files", () => {
     const task = makeTask({ files: undefined });
     const result = buildPrompt(task, SIMPLE_TEMPLATE);
-    expect(result).toContain("No specific files targeted.");
+    expect(result).not.toContain("### Files");
+    expect(result).not.toContain("{{files}}");
+    expect(result).not.toContain("{{#files}}");
   });
 
-  it("removes constraints block when no constraints", () => {
+  it("removes entire constraints section when no constraints", () => {
     const task = makeTask({ constraints: undefined });
     const result = buildPrompt(task, SIMPLE_TEMPLATE);
+    expect(result).not.toContain("### Constraints");
     expect(result).not.toContain("{{constraints}}");
     expect(result).not.toContain("{{#constraints}}");
   });
@@ -125,19 +128,29 @@ describe("buildPrompt", () => {
     expect(result).toContain("- Tests pass");
     expect(result).toContain("- src/auth.ts");
   });
+
+  it("removes block without heading when no heading precedes it", () => {
+    const template = "Before\n{{#files}}\n- {{.}}\n{{/files}}\nAfter";
+    const task = makeTask({ files: undefined });
+    const result = buildPrompt(task, template);
+    expect(result).toContain("Before");
+    expect(result).toContain("After");
+    expect(result).not.toContain("{{");
+  });
 });
 
 describe("buildExecutionPlan", () => {
-  it("creates an execution plan from task, template, and config", () => {
+  it("creates an execution plan with interpolated system prompt", () => {
     const task = makeTask();
     const config = makeConfig();
-    const plan = buildExecutionPlan(task, SIMPLE_TEMPLATE, config);
+    const systemPrompt = "You are Ralph. Project: {{project_name}}. Test: {{test_command}}.";
+    const plan = buildExecutionPlan(task, SIMPLE_TEMPLATE, config, systemPrompt);
 
     expect(plan.model).toBe("opus");
     expect(plan.max_turns).toBe(50);
     expect(plan.budget_usd).toBe(5.0);
     expect(plan.timeout_ms).toBe(1800000);
-    expect(plan.system_prompt_file).toBe(".ralph/ralph-system.md");
+    expect(plan.system_prompt).toBe("You are Ralph. Project: test-project. Test: bun test.");
     expect(plan.permission_mode).toBe("skip_all");
     expect(plan.prompt).toContain("Fix the auth bug");
   });
@@ -152,11 +165,22 @@ describe("buildExecutionPlan", () => {
         timeout_seconds: 900,
       },
     });
-    const plan = buildExecutionPlan(makeTask(), SIMPLE_TEMPLATE, config);
+    const plan = buildExecutionPlan(makeTask(), SIMPLE_TEMPLATE, config, "");
 
     expect(plan.model).toBe("sonnet");
     expect(plan.max_turns).toBe(25);
     expect(plan.budget_usd).toBe(2.0);
     expect(plan.timeout_ms).toBe(900000);
+  });
+
+  it("interpolates project name and test command into system prompt", () => {
+    const config = makeConfig({
+      project: { name: "my-app" },
+      verify: { test: "npm test", build: "", lint: "" },
+    });
+    const systemPrompt = "Project: {{project_name}}\nTest: {{test_command}}";
+    const plan = buildExecutionPlan(makeTask(), SIMPLE_TEMPLATE, config, systemPrompt);
+
+    expect(plan.system_prompt).toBe("Project: my-app\nTest: npm test");
   });
 });

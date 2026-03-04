@@ -37,11 +37,23 @@ Parse the JSON output and display a formatted table:
 | TASK-002 | active | bugfix | 10 | Fix null crash in auth |
 | TASK-003 | done | refactor | 50 | Clean up logging |
 
+**For failed tasks**, include retry information:
+
+| ID | Status | Type | Retries | Title |
+|----|--------|------|---------|-------|
+| TASK-005 | failed | bugfix | 2/2 | Fix auth crash |
+
+Show `retry_count / max_retries` so the user knows if retries were exhausted.
+
 If no tasks are found, tell the user the queue is empty (or no tasks match the filter).
 
 ### Step 4: Offer follow-up actions
 
 Based on what's shown, suggest relevant next steps:
-- If tasks are in **review** — offer to review them (the ralph-review skill can help)
-- If the queue is **empty** — offer to create a task (the ralph-task skill can help)
-- If tasks are **failed** — show the task details so the user can decide whether to retry or investigate
+- Tasks in **review** — offer to review them (the ralph-review skill can help)
+- Queue **empty** — offer to create a task (the ralph-task skill can help)
+- **Failed** tasks — read the task file to show details:
+  ```bash
+  cat .ralph/tasks/failed/<TASK-ID>.md
+  ```
+  Then help the user decide whether to investigate the failure or create a new task.
