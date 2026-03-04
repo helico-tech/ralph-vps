@@ -1,4 +1,4 @@
-// E2E: Happy path — full cycle from pending through review to done
+// E2E: Happy path — full cycle from pending through done with follow-up tasks
 //
 // Uses real filesystem + real git (temp repos) + mock executor.
 // The executor writes a real file to simulate Claude's work.
@@ -17,7 +17,6 @@ import {
 } from "./helpers.js";
 import type { E2EEnv } from "./helpers.js";
 import { processTask } from "../../src/orchestrator/loop.js";
-import { reviewTask } from "../../src/client/review-task.js";
 import { MockExecutor } from "../../src/adapters/mock/mock-executor.js";
 
 let env: E2EEnv;
@@ -36,32 +35,25 @@ afterEach(async () => {
   await cleanupE2EEnv(env);
 });
 
-function makeClientDeps() {
-  return {
-    repo: env.deps.repo,
-    git: env.deps.git,
-    config: env.deps.config,
-    tasksDir: ".ralph/tasks",
-  };
-}
-
 describe("E2E — happy path", () => {
-  it("processes task from pending to review", async () => {
-    // Verify task starts in pending
+  it("processes feature task from pending to done and spawns review", async () => {
     const before = await env.deps.repo.findById("TASK-001");
     expect(before).not.toBeNull();
     expect(before!.status).toBe("pending");
 
-    // Run processTask
     await processTask(env.deps, before!);
 
-    // Task should now be in review
+    // Task should now be done
     const after = await env.deps.repo.findById("TASK-001");
     expect(after).not.toBeNull();
-    expect(after!.status).toBe("review");
-    expect(after!.branch).toBe("ralph/TASK-001");
-    expect(after!.cost_usd).toBe(0.05);
-    expect(after!.turns).toBe(5);
+    expect(after!.status).toBe("done");
+
+    // A review task should have been spawned
+    const allTasks = await env.deps.repo.listAll();
+    const review = allTasks.find((t) => t.type === "review");
+    expect(review).toBeDefined();
+    expect(review!.parent_id).toBe("TASK-001");
+    expect(review!.status).toBe("pending");
   });
 
   it("creates and pushes feature branch", async () => {
@@ -82,7 +74,6 @@ describe("E2E — happy path", () => {
     const content = await Bun.file(join(env.workDir, "agent-output.txt")).text();
     expect(content).toContain("Agent was here");
 
-    // Switch back to main
     await run(env.workDir, "git checkout main");
   });
 
@@ -91,54 +82,12 @@ describe("E2E — happy path", () => {
     await processTask(env.deps, task!);
 
     const types = env.deps.obs.events.map((e) => e.type);
-    expect(types).toEqual([
-      "task.claimed",
-      "execution.started",
-      "execution.completed",
-      "verification.started",
-      "verification.completed",
-      "task.completed",
-    ]);
-  });
-
-  it("full cycle: pending → review → done (approve)", async () => {
-    // Step 1: Orchestrator processes task
-    const task = await env.deps.repo.findById("TASK-001");
-    await processTask(env.deps, task!);
-
-    // Verify task is in review
-    const inReview = await env.deps.repo.findById("TASK-001");
-    expect(inReview!.status).toBe("review");
-
-    // Step 2: Client approves the task
-    const approved = await reviewTask(makeClientDeps(), "TASK-001", { decision: "approve" });
-    expect(approved.status).toBe("done");
-
-    // Task file should be in done/
-    const final = await env.deps.repo.findById("TASK-001");
-    expect(final).not.toBeNull();
-    expect(final!.status).toBe("done");
-  });
-
-  it("review approve merges feature branch changes into main", async () => {
-    const task = await env.deps.repo.findById("TASK-001");
-    await processTask(env.deps, task!);
-
-    await reviewTask(makeClientDeps(), "TASK-001", { decision: "approve" });
-
-    // The agent's file should now be on main (merged)
-    const content = await Bun.file(join(env.workDir, "agent-output.txt")).text();
-    expect(content).toContain("Agent was here");
-  });
-
-  it("review approve pushes all changes to remote", async () => {
-    const task = await env.deps.repo.findById("TASK-001");
-    await processTask(env.deps, task!);
-
-    await reviewTask(makeClientDeps(), "TASK-001", { decision: "approve" });
-
-    // Verify remote main has the merge
-    const remoteLog = await run(env.remoteDir, "git log --oneline main");
-    expect(remoteLog).toContain("approved");
+    expect(types).toContain("task.claimed");
+    expect(types).toContain("execution.started");
+    expect(types).toContain("execution.completed");
+    expect(types).toContain("verification.started");
+    expect(types).toContain("verification.completed");
+    expect(types).toContain("task.completed");
+    expect(types).toContain("task.spawned");
   });
 });

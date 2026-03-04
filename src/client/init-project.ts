@@ -14,28 +14,17 @@ export interface InitResult {
   skipped: string[];
 }
 
-/**
- * Resolve the Ralph installation root (the directory containing package.json).
- * Works whether running from source (src/client/init-project.ts) or from a
- * symlinked binary — we walk up from this file's location.
- */
 function resolveRalphRoot(): string {
-  // import.meta.dir gives us the directory of this file
-  // We're at <ralph-root>/src/client/ — go up two levels
   return dirname(dirname(import.meta.dir));
 }
 
-/**
- * Scaffold a target project directory with Ralph config, templates, task dirs, and skills.
- * Skips any files/dirs that already exist (safe to re-run).
- */
 export async function initProject(targetDir: string, options: InitOptions): Promise<InitResult> {
   const ralphRoot = resolveRalphRoot();
   const created: string[] = [];
   const skipped: string[] = [];
 
   // --- 1. Task directories ---
-  const statuses = ["pending", "active", "review", "done", "failed"];
+  const statuses = ["pending", "active", "done", "failed"];
   for (const status of statuses) {
     const dir = join(targetDir, ".ralph", "tasks", status);
     const result = await ensureDir(dir);
@@ -61,7 +50,7 @@ export async function initProject(targetDir: string, options: InitOptions): Prom
 
   // --- 5. Skills ---
   const skillsSourceDir = join(ralphRoot, ".claude", "skills");
-  const skillNames = ["ralph-task", "ralph-status", "ralph-review", "ralph-list"];
+  const skillNames = ["ralph-task", "ralph-status", "ralph-list"];
   for (const skill of skillNames) {
     const destDir = join(targetDir, ".claude", "skills", skill);
     await ensureDir(destDir);
@@ -78,22 +67,11 @@ function generateConfig(options: InitOptions): string {
   const config = {
     version: 1,
     project: { name: options.name },
-    verify: {
-      test: options.testCmd,
-      build: "",
-      lint: "",
-    },
+    verify: options.testCmd,
     task_defaults: {
-      max_retries: 2,
       model: "claude-opus-4-5",
       max_turns: 50,
-      max_budget_usd: 5.0,
       timeout_seconds: 1800,
-    },
-    exit_criteria: {
-      require_tests: true,
-      require_build: false,
-      require_lint: false,
     },
     git: {
       main_branch: options.mainBranch ?? "main",
@@ -113,7 +91,6 @@ async function ensureDir(path: string): Promise<"created" | "skipped"> {
   } catch { /* directory doesn't exist yet */ }
 
   await mkdir(path, { recursive: true });
-  // Write .gitkeep so empty dirs are tracked by git
   await Bun.write(join(path, ".gitkeep"), "");
   return "created";
 }
@@ -145,11 +122,10 @@ async function copyDir(
   try {
     entries = await readdir(srcDir);
   } catch {
-    return; // source dir doesn't exist — nothing to copy
+    return;
   }
 
   for (const entry of entries) {
-    // Skip ralph-system.md — it's copied separately to .ralph/ root
     if (entry === "ralph-system.md") continue;
 
     const src = join(srcDir, entry);

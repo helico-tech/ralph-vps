@@ -5,15 +5,10 @@ import type { Task } from "../../src/core/types.js";
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: "task-001",
-    title: "Test task",
     status: "pending",
     type: "feature",
     priority: 100,
-    created_at: "2026-03-03T12:00:00Z",
-    author: "Arjan",
     description: "",
-    max_retries: 2,
-    retry_count: 0,
     ...overrides,
   };
 }
@@ -45,29 +40,12 @@ describe("pickNextTask", () => {
     expect(result?.id).toBe("high");
   });
 
-  it("breaks ties by created_at (oldest first)", () => {
-    const newer = makeTask({ id: "newer", priority: 100, created_at: "2026-03-03T14:00:00Z" });
-    const older = makeTask({ id: "older", priority: 100, created_at: "2026-03-03T12:00:00Z" });
-
-    const result = pickNextTask([newer, older]);
-    expect(result?.id).toBe("older");
-  });
-
   it("ignores non-pending tasks", () => {
     const active = makeTask({ id: "active", status: "active", priority: 1 });
     const pending = makeTask({ id: "pending", status: "pending", priority: 100 });
 
     const result = pickNextTask([active, pending]);
     expect(result?.id).toBe("pending");
-  });
-
-  it("uses default priority (100) for missing priority", () => {
-    const withPriority = makeTask({ id: "explicit", priority: 100 });
-    const withDefault = makeTask({ id: "default", priority: 100 });
-
-    // Same priority, falls back to created_at
-    const result = pickNextTask([withPriority, withDefault]);
-    expect(result).not.toBeNull();
   });
 
   it("is a pure function — does not mutate input", () => {

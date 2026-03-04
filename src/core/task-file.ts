@@ -1,32 +1,28 @@
 // Task file parser/serializer — pure functions, operates on strings only
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import type { Task, TaskStatus, TaskType } from "./types.js";
+import type { Task, TaskType } from "./types.js";
 import { TaskError, ERROR_CODES } from "./errors.js";
 
-const VALID_STATUSES: TaskStatus[] = ["pending", "active", "review", "done", "failed"];
-const VALID_TYPES: TaskType[] = ["bugfix", "feature", "refactor", "research", "test", "chore"];
+const VALID_TYPES: TaskType[] = ["feature", "bugfix", "review", "fix"];
 
 const FRONTMATTER_DELIMITER = "---";
 
-interface RawFrontmatter {
-  [key: string]: unknown;
-}
-
 /**
  * Parse a task file (YAML frontmatter + Markdown body) into a Task object.
- * Throws TaskError for missing required fields or malformed content.
+ * Status is NOT read from frontmatter — it is set by the caller based on
+ * which directory the file was found in.
  */
 export function parseTaskFile(content: string): Task {
   const { frontmatter, body } = splitFrontmatter(content);
 
-  let parsed: RawFrontmatter;
+  let parsed: Record<string, unknown>;
   try {
-    parsed = parseYaml(frontmatter) as RawFrontmatter;
+    parsed = parseYaml(frontmatter) as Record<string, unknown>;
   } catch (e) {
     throw new TaskError(
       ERROR_CODES.PARSE_ERROR,
-      `Failed to parse YAML frontmatter: ${e instanceof Error ? e.message : String(e)}`
+      `Failed to parse YAML frontmatter: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
 
@@ -34,90 +30,48 @@ export function parseTaskFile(content: string): Task {
     throw new TaskError(ERROR_CODES.PARSE_ERROR, "Frontmatter must be a YAML mapping");
   }
 
-  // Required field
-  if (!parsed.title || typeof parsed.title !== "string") {
-    throw new TaskError(ERROR_CODES.MISSING_FIELD, "Task file must have a 'title' field");
+  if (!parsed.id || typeof parsed.id !== "string") {
+    throw new TaskError(ERROR_CODES.MISSING_FIELD, "Task file must have an 'id' field");
   }
 
-  // Validate status if present
-  const status = (parsed.status as string) ?? "pending";
-  if (!VALID_STATUSES.includes(status as TaskStatus)) {
-    throw new TaskError(
-      ERROR_CODES.INVALID_TYPE,
-      `Invalid status '${status}'. Must be one of: ${VALID_STATUSES.join(", ")}`
-    );
-  }
-
-  // Validate type if present — unknown types fall back to "feature"
+  // Validate type — unknown types fall back to "feature"
   let type = (parsed.type as string) ?? "feature";
   if (!VALID_TYPES.includes(type as TaskType)) {
     type = "feature";
   }
 
   // Extract known fields, preserve unknown ones
-  const {
-    id,
-    title,
-    status: _status,
-    type: _type,
-    priority,
-    created_at,
-    author,
-    acceptance_criteria,
-    files,
-    constraints,
-    max_retries,
-    retry_count,
-    claimed_at,
-    cost_usd,
-    turns,
-    duration_s,
-    attempt,
-    branch,
-    completed_at,
-    ...extra
-  } = parsed;
+  const { id, type: _type, priority, parent_id, commit_hash, status: _status, ...extra } = parsed;
+
+  // Validate parent_id is present for review/fix tasks
+  if ((type === "review" || type === "fix") && !parent_id) {
+    throw new TaskError(
+      ERROR_CODES.MISSING_FIELD,
+      `Task type '${type}' requires a 'parent_id' field`,
+    );
+  }
 
   const task: Task = {
-    id: asString(id, ""),
-    title: asString(title, ""),
-    status: status as TaskStatus,
+    ...extra,
+    id: String(id),
     type: type as TaskType,
     priority: asNumber(priority, 100),
-    created_at: asString(created_at, ""),
-    author: asString(author, ""),
+    status: "pending", // placeholder — caller overrides with directory-based status
     description: body.trim(),
-    max_retries: asNumber(max_retries, 2),
-    retry_count: asNumber(retry_count, 0),
-    ...extra,
   };
 
-  // Optional fields — only set if present
-  if (acceptance_criteria !== undefined) {
-    task.acceptance_criteria = asStringArray(acceptance_criteria);
-  }
-  if (files !== undefined) {
-    task.files = asStringArray(files);
-  }
-  if (constraints !== undefined) {
-    task.constraints = asStringArray(constraints);
-  }
-  if (claimed_at !== undefined) task.claimed_at = asString(claimed_at, "");
-  if (cost_usd !== undefined) task.cost_usd = asNumber(cost_usd, 0);
-  if (turns !== undefined) task.turns = asNumber(turns, 0);
-  if (duration_s !== undefined) task.duration_s = asNumber(duration_s, 0);
-  if (attempt !== undefined) task.attempt = asNumber(attempt, 0);
-  if (branch !== undefined) task.branch = asString(branch, "");
-  if (completed_at !== undefined) task.completed_at = asString(completed_at, "");
+  if (parent_id !== undefined) task.parent_id = String(parent_id);
+  if (commit_hash !== undefined) task.commit_hash = String(commit_hash);
 
   return task;
 }
 
 /**
  * Serialize a Task object back to a task file (YAML frontmatter + Markdown body).
+ * Status is NOT written to frontmatter — the directory is the source of truth.
  */
 export function serializeTaskFile(task: Task): string {
-  const { description, ...frontmatterFields } = task;
+  const { description, status: _status, ...frontmatterFields } = task;
 
   // Build frontmatter object, omitting undefined values
   const fm: Record<string, unknown> = {};
@@ -141,7 +95,7 @@ function splitFrontmatter(content: string): { frontmatter: string; body: string 
   if (!trimmed.startsWith(FRONTMATTER_DELIMITER)) {
     throw new TaskError(
       ERROR_CODES.PARSE_ERROR,
-      "Task file must start with '---' frontmatter delimiter"
+      "Task file must start with '---' frontmatter delimiter",
     );
   }
 
@@ -151,7 +105,7 @@ function splitFrontmatter(content: string): { frontmatter: string; body: string 
   if (closingIndex === -1) {
     throw new TaskError(
       ERROR_CODES.PARSE_ERROR,
-      "Task file missing closing '---' frontmatter delimiter"
+      "Task file missing closing '---' frontmatter delimiter",
     );
   }
 
@@ -161,12 +115,6 @@ function splitFrontmatter(content: string): { frontmatter: string; body: string 
   return { frontmatter, body };
 }
 
-function asString(value: unknown, fallback: string): string {
-  if (typeof value === "string") return value;
-  if (value === undefined || value === null) return fallback;
-  return String(value);
-}
-
 function asNumber(value: unknown, fallback: number): number {
   if (typeof value === "number") return value;
   if (typeof value === "string") {
@@ -174,14 +122,4 @@ function asNumber(value: unknown, fallback: number): number {
     if (!Number.isNaN(n)) return n;
   }
   return fallback;
-}
-
-function asStringArray(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.map((v) => String(v));
-  }
-  if (typeof value === "string") {
-    return [value];
-  }
-  return [];
 }

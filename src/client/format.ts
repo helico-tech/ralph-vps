@@ -7,7 +7,6 @@ import type { StatusReport, DoctorCheck } from "./types.js";
 const STATUS_COLOR: Record<TaskStatus, (s: string) => string> = {
   pending: kleur.yellow,
   active: kleur.blue,
-  review: kleur.magenta,
   done: kleur.green,
   failed: kleur.red,
 };
@@ -19,11 +18,12 @@ function pad(str: string, len: number): string {
 export function formatTaskTable(tasks: Task[]): string {
   if (tasks.length === 0) return kleur.dim("No tasks found.");
 
-  const header = `${pad("ID", 12)}${pad("Status", 10)}${pad("Type", 10)}${pad("Pri", 5)}Title`;
+  const header = `${pad("ID", 12)}${pad("Status", 10)}${pad("Type", 10)}${pad("Pri", 5)}Description`;
   const separator = "─".repeat(60);
   const rows = tasks.map((t) => {
     const color = STATUS_COLOR[t.status];
-    return `${pad(t.id, 12)}${color(pad(t.status, 10))}${pad(t.type, 10)}${pad(String(t.priority), 5)}${t.title}`;
+    const desc = t.description.split("\n")[0].slice(0, 40);
+    return `${pad(t.id, 12)}${color(pad(t.status, 10))}${pad(t.type, 10)}${pad(String(t.priority), 5)}${desc}`;
   });
 
   return [kleur.bold(header), separator, ...rows].join("\n");
@@ -37,7 +37,7 @@ export function formatStatus(report: StatusReport): string {
   lines.push("");
   lines.push(`Tasks: ${kleur.bold(String(report.total))} total`);
 
-  const statusOrder: TaskStatus[] = ["active", "review", "pending", "done", "failed"];
+  const statusOrder: TaskStatus[] = ["active", "pending", "done", "failed"];
   for (const status of statusOrder) {
     const count = report.counts[status];
     if (count > 0) {
@@ -49,7 +49,7 @@ export function formatStatus(report: StatusReport): string {
   lines.push("");
 
   if (report.active_task) {
-    lines.push(`Active: ${kleur.bold(report.active_task.id)} — ${report.active_task.title}`);
+    lines.push(`Active: ${kleur.bold(report.active_task.id)} (${report.active_task.type})`);
   } else {
     lines.push(kleur.dim("No active task"));
   }

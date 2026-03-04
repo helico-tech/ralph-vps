@@ -1,7 +1,7 @@
-// Crash recovery — moves orphaned active tasks back to pending or failed
+// Crash recovery — moves orphaned active tasks back to pending
 
 import type { OrchestratorDeps } from "./loop.js";
-import { transitionTask } from "../core/state-machine.js";
+import { resolveBranchName } from "../core/next-task.js";
 
 export async function recoverOrphanedTasks(deps: OrchestratorDeps): Promise<void> {
   const { repo, git, obs, config } = deps;
@@ -15,19 +15,14 @@ export async function recoverOrphanedTasks(deps: OrchestratorDeps): Promise<void
   const recovered: string[] = [];
 
   for (const { task } of orphans) {
-    const branchName = `${config.git.branch_prefix}${task.id}`;
-    const canRetry = task.retry_count < task.max_retries;
-    const target = canRetry ? ("pending" as const) : ("failed" as const);
+    const branchName = resolveBranchName(task, config.git.branch_prefix);
 
-    const updated = transitionTask(task, target, now);
-    await repo.transition(updated, "active", target);
+    // Recovery is an admin operation — bypass state machine
+    const updated = { ...task, status: "pending" as const };
+    await repo.transition(updated, "active", "pending");
     recovered.push(task.id);
 
-    if (canRetry) {
-      obs.emit({ type: "task.retried", task_id: task.id, timestamp: now, attempt: updated.retry_count });
-    } else {
-      obs.emit({ type: "task.failed", task_id: task.id, timestamp: now, reason: "crash recovery: retries exhausted" });
-    }
+    obs.emit({ type: "task.recovered", task_id: task.id, timestamp: now });
 
     // Clean up stale branch — best effort
     try {
@@ -40,7 +35,6 @@ export async function recoverOrphanedTasks(deps: OrchestratorDeps): Promise<void
     }
   }
 
-  // One atomic commit for all recovered tasks — stage only task files, not working tree debris
   await git.stageFiles([deps.tasksDir]);
   await git.commit(
     `ralph: crash recovery — ${recovered.length} task(s) returned to queue`,

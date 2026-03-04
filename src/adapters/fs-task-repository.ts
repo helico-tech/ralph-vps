@@ -8,7 +8,7 @@ import type { TaskRepository } from "../ports/task-repository.js";
 import { parseTaskFile, serializeTaskFile } from "../core/task-file.js";
 import { TaskError, ERROR_CODES } from "../core/errors.js";
 
-const STATUSES: TaskStatus[] = ["pending", "active", "review", "done", "failed"];
+const STATUSES: TaskStatus[] = ["pending", "active", "done", "failed"];
 
 export class FsTaskRepository implements TaskRepository {
   constructor(private readonly basePath: string) {}
@@ -24,7 +24,9 @@ export class FsTaskRepository implements TaskRepository {
       const file = Bun.file(path);
       if (await file.exists()) {
         const content = await file.text();
-        return parseTaskFile(content);
+        const task = parseTaskFile(content);
+        task.status = status;
+        return task;
       }
     }
     return null;
@@ -34,14 +36,11 @@ export class FsTaskRepository implements TaskRepository {
     const sourcePath = this.pathFor(task.id, from);
     const destPath = this.pathFor(task.id, to);
 
-    // Ensure destination directory exists
     await mkdir(join(this.basePath, to), { recursive: true });
 
-    // Enforce correct status in the written file regardless of caller
-    const content = serializeTaskFile({ ...task, status: to });
+    const content = serializeTaskFile(task);
     await Bun.write(destPath, content);
 
-    // Then delete source
     try {
       await unlink(sourcePath);
     } catch (err) {
@@ -56,7 +55,7 @@ export class FsTaskRepository implements TaskRepository {
     }
     const destDir = join(this.basePath, "pending");
     await mkdir(destDir, { recursive: true });
-    const content = serializeTaskFile({ ...task, status: "pending" });
+    const content = serializeTaskFile(task);
     await Bun.write(join(destDir, `${task.id}.md`), content);
   }
 
@@ -65,7 +64,7 @@ export class FsTaskRepository implements TaskRepository {
       STATUSES.map(async (status) => {
         const tasks = await this.listByStatus(status);
         return tasks.map((task) => ({ task, directory: status }));
-      })
+      }),
     );
     return all.flat();
   }
@@ -88,7 +87,9 @@ export class FsTaskRepository implements TaskRepository {
     for (const file of files) {
       if (!file.endsWith(".md")) continue;
       const content = await Bun.file(join(dir, file)).text();
-      tasks.push(parseTaskFile(content));
+      const task = parseTaskFile(content);
+      task.status = status;
+      tasks.push(task);
     }
     return tasks;
   }

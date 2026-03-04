@@ -42,16 +42,6 @@ export class ConfigError extends Error {
   }
 }
 
-export class VerificationError extends Error {
-  readonly code: string;
-
-  constructor(code: string, message: string) {
-    super(message);
-    this.name = "VerificationError";
-    this.code = code;
-  }
-}
-
 // Error codes
 export const ERROR_CODES = {
   // TaskError
@@ -80,9 +70,4 @@ export const ERROR_CODES = {
   CONFIG_NOT_FOUND: "CONFIG_NOT_FOUND",
   CONFIG_INVALID: "CONFIG_INVALID",
   CONFIG_MISSING_FIELD: "CONFIG_MISSING_FIELD",
-
-  // VerificationError
-  TEST_FAILED: "TEST_FAILED",
-  BUILD_FAILED: "BUILD_FAILED",
-  LINT_FAILED: "LINT_FAILED",
 } as const;

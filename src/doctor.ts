@@ -4,9 +4,6 @@ import { join } from "path";
 import { access } from "fs/promises";
 import type { DoctorCheck } from "./client/types.js";
 import { loadConfig } from "./orchestrator/config.js";
-import type { TaskRepository } from "./ports/task-repository.js";
-import type { SourceControl } from "./ports/source-control.js";
-import { checkConsistency } from "./core/consistency.js";
 
 export async function checkGitRepo(cwd: string): Promise<DoctorCheck> {
   try {
@@ -27,7 +24,7 @@ export async function checkConfig(configPath: string): Promise<DoctorCheck> {
 }
 
 export async function checkTaskDirs(tasksDir: string): Promise<DoctorCheck> {
-  const required = ["pending", "active", "review", "done", "failed"];
+  const required = ["pending", "active", "done", "failed"];
   const missing: string[] = [];
   for (const dir of required) {
     try {
@@ -63,25 +60,6 @@ export async function checkClaudeCli(): Promise<DoctorCheck> {
   }
 }
 
-export async function checkTaskConsistency(
-  repo: TaskRepository,
-  git: SourceControl,
-  branchPrefix: string,
-): Promise<DoctorCheck> {
-  try {
-    const tasks = await repo.listAll();
-    const branches = await git.listBranches();
-    const report = checkConsistency(tasks, branches, branchPrefix);
-    if (report.clean) {
-      return { name: "Task consistency", passed: true, message: "OK" };
-    }
-    const messages = report.issues.map((i) => i.message);
-    return { name: "Task consistency", passed: false, message: messages.join("; ") };
-  } catch (err) {
-    return { name: "Task consistency", passed: false, message: err instanceof Error ? err.message : String(err) };
-  }
-}
-
 export async function runDoctor(cwd: string): Promise<DoctorCheck[]> {
   const checks: DoctorCheck[] = [];
   const configPath = join(cwd, ".ralph", "config.json");
@@ -91,24 +69,6 @@ export async function runDoctor(cwd: string): Promise<DoctorCheck[]> {
   checks.push(await checkConfig(configPath));
   checks.push(await checkTaskDirs(tasksDir));
   checks.push(await checkClaudeCli());
-
-  // Consistency check only if config is valid
-  if (checks[1].passed) {
-    try {
-      const config = await loadConfig(configPath);
-      const { FsTaskRepository } = await import("./adapters/fs-task-repository.js");
-      const { GitSourceControl } = await import("./adapters/git-source-control.js");
-      const repo = new FsTaskRepository(tasksDir);
-      const git = new GitSourceControl(cwd);
-      checks.push(await checkTaskConsistency(repo, git, config.git.branch_prefix));
-    } catch (err) {
-      checks.push({
-        name: "Task consistency",
-        passed: false,
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
 
   return checks;
 }

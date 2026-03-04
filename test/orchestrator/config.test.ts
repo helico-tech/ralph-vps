@@ -27,7 +27,7 @@ async function writeConfig(obj: unknown): Promise<string> {
 const MINIMAL_CONFIG = {
   version: 1,
   project: { name: "test-project" },
-  verify: { test: "bun test" },
+  verify: "bun test",
 };
 
 describe("loadConfig — happy path", () => {
@@ -35,15 +35,12 @@ describe("loadConfig — happy path", () => {
     const path = await writeConfig({
       version: 1,
       project: { name: "my-project" },
-      verify: { test: "bun test", build: "bun build", lint: "bun lint" },
+      verify: "bun test",
       task_defaults: {
-        max_retries: 3,
         model: "claude-sonnet-4-5",
         max_turns: 100,
-        max_budget_usd: 10.0,
         timeout_seconds: 3600,
       },
-      exit_criteria: { require_tests: true, require_build: true, require_lint: true },
       git: { main_branch: "develop", branch_prefix: "auto/" },
       execution: { permission_mode: "default" },
     });
@@ -51,9 +48,7 @@ describe("loadConfig — happy path", () => {
     const config = await loadConfig(path);
 
     expect(config.project.name).toBe("my-project");
-    expect(config.verify.test).toBe("bun test");
-    expect(config.verify.build).toBe("bun build");
-    expect(config.task_defaults.max_retries).toBe(3);
+    expect(config.verify).toBe("bun test");
     expect(config.task_defaults.model).toBe("claude-sonnet-4-5");
     expect(config.git.main_branch).toBe("develop");
     expect(config.git.branch_prefix).toBe("auto/");
@@ -64,16 +59,11 @@ describe("loadConfig — happy path", () => {
     const path = await writeConfig(MINIMAL_CONFIG);
     const config = await loadConfig(path);
 
-    expect(config.task_defaults.max_retries).toBe(2);
     expect(config.task_defaults.model).toBe("claude-opus-4-5");
     expect(config.task_defaults.max_turns).toBe(50);
-    expect(config.task_defaults.max_budget_usd).toBe(5.0);
     expect(config.task_defaults.timeout_seconds).toBe(1800);
     expect(config.git.main_branch).toBe("main");
     expect(config.git.branch_prefix).toBe("ralph/");
-    expect(config.exit_criteria.require_tests).toBe(true);
-    expect(config.exit_criteria.require_build).toBe(false);
-    expect(config.exit_criteria.require_lint).toBe(false);
   });
 });
 
@@ -114,7 +104,7 @@ describe("loadConfig — validation", () => {
   });
 
   it("throws CONFIG_MISSING_FIELD when project.name is missing", async () => {
-    const path = await writeConfig({ version: 1, verify: { test: "bun test" } });
+    const path = await writeConfig({ version: 1, verify: "bun test" });
     try {
       await loadConfig(path);
       throw new Error("should have thrown");
@@ -125,7 +115,7 @@ describe("loadConfig — validation", () => {
     }
   });
 
-  it("throws CONFIG_MISSING_FIELD when verify.test is missing", async () => {
+  it("throws CONFIG_MISSING_FIELD when verify is missing", async () => {
     const path = await writeConfig({ version: 1, project: { name: "x" } });
     try {
       await loadConfig(path);
@@ -133,35 +123,7 @@ describe("loadConfig — validation", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(ConfigError);
       expect((err as ConfigError).code).toBe("CONFIG_MISSING_FIELD");
-      expect((err as ConfigError).message).toContain("verify.test");
-    }
-  });
-
-  it("throws CONFIG_INVALID for negative max_retries", async () => {
-    const path = await writeConfig({
-      ...MINIMAL_CONFIG,
-      task_defaults: { max_retries: -1 },
-    });
-    try {
-      await loadConfig(path);
-      throw new Error("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(ConfigError);
-      expect((err as ConfigError).code).toBe("CONFIG_INVALID");
-    }
-  });
-
-  it("throws CONFIG_INVALID for non-numeric max_budget_usd", async () => {
-    const path = await writeConfig({
-      ...MINIMAL_CONFIG,
-      task_defaults: { max_budget_usd: "not a number" },
-    });
-    try {
-      await loadConfig(path);
-      throw new Error("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(ConfigError);
-      expect((err as ConfigError).code).toBe("CONFIG_INVALID");
+      expect((err as ConfigError).message).toContain("verify");
     }
   });
 });

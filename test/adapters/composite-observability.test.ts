@@ -25,7 +25,7 @@ describe("CompositeObservability", () => {
     const composite = new CompositeObservability([spy]);
 
     const e1: DomainEvent = { type: "task.claimed", task_id: "t1", timestamp: "2026-03-03T12:00:00Z" };
-    const e2: DomainEvent = { type: "task.completed", task_id: "t1", timestamp: "2026-03-03T13:00:00Z", cost_usd: 0.5, turns: 10, duration_s: 60 };
+    const e2: DomainEvent = { type: "task.completed", task_id: "t1", timestamp: "2026-03-03T13:00:00Z" };
 
     composite.emit(e1);
     composite.emit(e2);
@@ -51,7 +51,6 @@ describe("CompositeObservability", () => {
 
   it("works with zero children", () => {
     const composite = new CompositeObservability([]);
-    // Should not throw
     composite.emit(makeEvent());
   });
 });

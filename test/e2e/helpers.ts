@@ -4,7 +4,7 @@
 // - Bare remote repo (so push/pull work)
 // - Working clone with .ralph/ structure, config, templates
 // - Real FsTaskRepository + GitSourceControl
-// - Mock executor, verifier, observability
+// - Mock executor, observability
 
 import { mkdtemp, rm, mkdir } from "fs/promises";
 import { join } from "path";
@@ -12,7 +12,6 @@ import { tmpdir } from "os";
 import { FsTaskRepository } from "../../src/adapters/fs-task-repository.js";
 import { GitSourceControl } from "../../src/adapters/git-source-control.js";
 import { MockExecutor } from "../../src/adapters/mock/mock-executor.js";
-import { MockVerifier } from "../../src/adapters/mock/mock-verifier.js";
 import { MockObservability } from "../../src/adapters/mock/mock-observability.js";
 import { serializeTaskFile } from "../../src/core/task-file.js";
 import type { OrchestratorDeps } from "../../src/orchestrator/loop.js";
@@ -22,7 +21,6 @@ export interface E2EDeps extends OrchestratorDeps {
   repo: FsTaskRepository;
   git: GitSourceControl;
   executor: MockExecutor;
-  verifier: MockVerifier;
   obs: MockObservability;
 }
 
@@ -35,15 +33,12 @@ export interface E2EEnv {
 const TEST_CONFIG: RalphConfig = {
   version: 1,
   project: { name: "e2e-test" },
-  verify: { test: "echo pass", build: "", lint: "" },
+  verify: "true", // always passes
   task_defaults: {
-    max_retries: 2,
     model: "opus",
     max_turns: 50,
-    max_budget_usd: 5,
     timeout_seconds: 1800,
   },
-  exit_criteria: { require_tests: true, require_build: false, require_lint: false },
   git: { main_branch: "main", branch_prefix: "ralph/" },
   execution: { permission_mode: "skip_all" },
 };
@@ -84,7 +79,7 @@ export async function createE2EEnv(
 
   // Create .ralph/ directory structure
   const tasksDir = join(workDir, ".ralph", "tasks");
-  const statuses = ["pending", "active", "review", "done", "failed"];
+  const statuses = ["pending", "active", "done", "failed"];
   for (const status of statuses) {
     await mkdir(join(tasksDir, status), { recursive: true });
   }
@@ -96,9 +91,9 @@ export async function createE2EEnv(
   // Write templates
   const templatesDir = join(workDir, ".ralph", "templates");
   await mkdir(templatesDir, { recursive: true });
-  await Bun.write(join(templatesDir, "default.md"), "Task: {{title}}\n\n{{description}}");
-  await Bun.write(join(templatesDir, "feature.md"), "Feature: {{title}}\n\n{{description}}");
-  await Bun.write(join(templatesDir, "bugfix.md"), "Bugfix: {{title}}\n\n{{description}}");
+  await Bun.write(join(templatesDir, "default.md"), "Task: {{id}}\n\n{{description}}");
+  await Bun.write(join(templatesDir, "feature.md"), "Feature: {{id}}\n\n{{description}}");
+  await Bun.write(join(templatesDir, "bugfix.md"), "Bugfix: {{id}}\n\n{{description}}");
 
   // Write system prompt
   await Bun.write(join(workDir, ".ralph", "ralph-system.md"), "You are Ralph.");
@@ -111,14 +106,12 @@ export async function createE2EEnv(
   const repo = new FsTaskRepository(tasksDir);
   const git = new GitSourceControl(workDir);
   const executor = new MockExecutor(executorResult);
-  const verifier = new MockVerifier();
   const obs = new MockObservability();
 
   const deps: E2EDeps = {
     repo,
     git,
     executor,
-    verifier,
     obs,
     config,
     templatesDir,
@@ -174,9 +167,6 @@ export function makeFileWritingExecutor(
 
     return {
       stop_reason: "end_turn",
-      cost_usd: 0.05,
-      turns: 5,
-      duration_s: 30,
       output: "Done.",
       ...result,
     };
@@ -186,15 +176,10 @@ export function makeFileWritingExecutor(
 export function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: "TASK-001",
-    title: "E2E test task",
     status: "pending",
     type: "feature",
     priority: 100,
-    created_at: "2026-03-03T12:00:00Z",
-    author: "E2ETest",
     description: "Do the thing for E2E.",
-    max_retries: 2,
-    retry_count: 0,
     ...overrides,
   };
 }

@@ -7,15 +7,10 @@ import type { Task } from "../../src/core/types.js";
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: "TASK-001",
-    title: "Test task",
     status: "pending",
     type: "feature",
     priority: 100,
-    created_at: "2026-03-03T12:00:00Z",
-    author: "Arjan",
     description: "",
-    max_retries: 2,
-    retry_count: 0,
     ...overrides,
   };
 }
@@ -25,7 +20,7 @@ describe("getStatus", () => {
     const repo = new MockTaskRepository();
     repo.seed(makeTask({ id: "t1", status: "pending" }), "pending");
     repo.seed(makeTask({ id: "t2", status: "pending" }), "pending");
-    repo.seed(makeTask({ id: "t3", status: "active", claimed_at: "2026-03-03T12:00:00Z" }), "active");
+    repo.seed(makeTask({ id: "t3", status: "active" }), "active");
     repo.seed(makeTask({ id: "t4", status: "done" }), "done");
     const git = new MockSourceControl();
 
@@ -34,24 +29,20 @@ describe("getStatus", () => {
     expect(report.counts.pending).toBe(2);
     expect(report.counts.active).toBe(1);
     expect(report.counts.done).toBe(1);
-    expect(report.counts.review).toBe(0);
     expect(report.counts.failed).toBe(0);
     expect(report.total).toBe(4);
   });
 
   it("reports active task", async () => {
     const repo = new MockTaskRepository();
-    repo.seed(
-      makeTask({ id: "t1", status: "active", title: "Fix auth", claimed_at: "2026-03-03T12:00:00Z" }),
-      "active",
-    );
+    repo.seed(makeTask({ id: "t1", status: "active", type: "bugfix" }), "active");
     const git = new MockSourceControl();
 
     const report = await getStatus(repo, git);
 
     expect(report.active_task).not.toBeNull();
     expect(report.active_task!.id).toBe("t1");
-    expect(report.active_task!.title).toBe("Fix auth");
+    expect(report.active_task!.type).toBe("bugfix");
   });
 
   it("reports null when no active task", async () => {

@@ -9,22 +9,20 @@ export interface ListTasksOptions {
 
 const STATUS_ORDER: Record<TaskStatus, number> = {
   active: 0,
-  review: 1,
-  pending: 2,
-  done: 3,
-  failed: 4,
+  pending: 1,
+  done: 2,
+  failed: 3,
 };
 
 /**
- * Sort tasks by status group (active > review > pending > done > failed),
- * then by priority (lower = higher), then by created_at (oldest first).
+ * Sort tasks by status group (active > pending > done > failed),
+ * then by priority (lower = higher).
  */
 export function sortTasks(tasks: Task[]): Task[] {
   return [...tasks].sort((a, b) => {
     const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
     if (statusDiff !== 0) return statusDiff;
-    if (a.priority !== b.priority) return a.priority - b.priority;
-    return a.created_at.localeCompare(b.created_at);
+    return a.priority - b.priority;
   });
 }
 

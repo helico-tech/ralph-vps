@@ -9,9 +9,8 @@ import type { ClientDeps } from "../../src/client/types.js";
 const TEST_CONFIG: RalphConfig = {
   version: 1,
   project: { name: "test" },
-  verify: { test: "bun test", build: "", lint: "" },
-  task_defaults: { max_retries: 2, model: "opus", max_turns: 50, max_budget_usd: 5, timeout_seconds: 1800 },
-  exit_criteria: { require_tests: true, require_build: false, require_lint: false },
+  verify: "bun test",
+  task_defaults: { model: "opus", max_turns: 50, timeout_seconds: 1800 },
   git: { main_branch: "main", branch_prefix: "ralph/" },
   execution: { permission_mode: "skip_all" },
 };
@@ -19,15 +18,10 @@ const TEST_CONFIG: RalphConfig = {
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: "TASK-001",
-    title: "Test task",
     status: "pending",
     type: "feature",
     priority: 100,
-    created_at: "2026-03-03T12:00:00Z",
-    author: "Arjan",
     description: "Do the thing.",
-    max_retries: 2,
-    retry_count: 0,
     ...overrides,
   };
 }
@@ -79,10 +73,10 @@ describe("generateNextId", () => {
 describe("createTask", () => {
   it("creates a task with generated ID", async () => {
     const deps = makeDeps();
-    const task = await createTask(deps, { title: "Fix the bug" });
+    const task = await createTask(deps, { description: "Fix the bug" });
 
     expect(task.id).toBe("TASK-001");
-    expect(task.title).toBe("Fix the bug");
+    expect(task.description).toBe("Fix the bug");
     expect(task.status).toBe("pending");
     expect(task.type).toBe("feature");
   });
@@ -90,12 +84,12 @@ describe("createTask", () => {
   it("uses provided type and priority", async () => {
     const deps = makeDeps();
     const task = await createTask(deps, {
-      title: "Refactor auth",
-      type: "refactor",
+      description: "Fix auth crash",
+      type: "bugfix",
       priority: 50,
     });
 
-    expect(task.type).toBe("refactor");
+    expect(task.type).toBe("bugfix");
     expect(task.priority).toBe(50);
   });
 
@@ -103,23 +97,23 @@ describe("createTask", () => {
     const deps = makeDeps();
     deps.repo.seed(makeTask({ id: "TASK-003" }), "pending");
 
-    const task = await createTask(deps, { title: "New task" });
+    const task = await createTask(deps, { description: "New task" });
     expect(task.id).toBe("TASK-004");
   });
 
   it("writes task to repository", async () => {
     const deps = makeDeps();
-    const task = await createTask(deps, { title: "Stored task" });
+    const task = await createTask(deps, { description: "Stored task" });
 
     const stored = await deps.repo.findById(task.id);
     expect(stored).not.toBeNull();
-    expect(stored!.title).toBe("Stored task");
+    expect(stored!.description).toBe("Stored task");
     expect(stored!.status).toBe("pending");
   });
 
   it("stages, commits, and pushes", async () => {
     const deps = makeDeps();
-    await createTask(deps, { title: "Git task" });
+    await createTask(deps, { description: "Git task" });
 
     expect(deps.git.staged).toHaveLength(1);
     expect(deps.git.staged[0]).toEqual([".ralph/tasks/pending/TASK-001.md"]);
@@ -127,32 +121,12 @@ describe("createTask", () => {
     expect(deps.git.commits[0]).toContain("TASK-001");
   });
 
-  it("sets max_retries from config", async () => {
-    const deps = makeDeps();
-    const task = await createTask(deps, { title: "Config task" });
-    expect(task.max_retries).toBe(2);
-  });
-
-  it("includes optional fields when provided", async () => {
-    const deps = makeDeps();
-    const task = await createTask(deps, {
-      title: "Full task",
-      description: "Detailed description",
-      acceptance_criteria: ["Tests pass", "Lint clean"],
-      files: ["src/main.ts"],
-    });
-
-    expect(task.description).toBe("Detailed description");
-    expect(task.acceptance_criteria).toEqual(["Tests pass", "Lint clean"]);
-    expect(task.files).toEqual(["src/main.ts"]);
-  });
-
   it("throws GIT_PUSH_FAILED when push fails", async () => {
     const deps = makeDeps();
     deps.git.setPushFails(true);
 
     try {
-      await createTask(deps, { title: "Push fail task" });
+      await createTask(deps, { description: "Push fail task" });
       throw new Error("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(GitError);

@@ -8,16 +8,11 @@ import { GitSourceControl } from "./adapters/git-source-control.js";
 import { loadConfig } from "./orchestrator/config.js";
 import { createTask } from "./client/create-task.js";
 import { listTasks } from "./client/list-tasks.js";
-import { reviewTask } from "./client/review-task.js";
 import { getStatus } from "./client/status.js";
 import { formatTaskTable, formatStatus, formatDoctorResults } from "./client/format.js";
 import { runDoctor } from "./doctor.js";
 import type { ClientDeps } from "./client/types.js";
-import type { TaskStatus, TaskType } from "./core/types.js";
-
-function collect(value: string, previous: string[]): string[] {
-  return [...previous, value];
-}
+import type { TaskType } from "./core/types.js";
 
 const program = new Command();
 
@@ -69,7 +64,6 @@ program
       const { TraceWriter } = await import("./adapters/trace-writer.js");
       const { ConsoleLogger } = await import("./adapters/console-logger.js");
       const { ClaudeCliExecutor } = await import("./adapters/claude-cli-executor.js");
-      const { ShellVerifier } = await import("./adapters/shell-verifier.js");
 
       const cwd = process.cwd();
       const config = await loadConfig(join(cwd, ".ralph", "config.json"));
@@ -80,10 +74,9 @@ program
         new ConsoleLogger(),
       ]);
       const executor = new ClaudeCliExecutor();
-      const verifier = new ShellVerifier(cwd);
 
       const deps = {
-        repo, git, executor, verifier, obs, config,
+        repo, git, executor, obs, config,
         templatesDir: join(cwd, ".ralph", "templates"),
         tasksDir: ".ralph/tasks",
         systemPromptPath: join(cwd, ".ralph", "ralph-system.md"),
@@ -104,28 +97,18 @@ const taskCmd = program.command("task").description("Manage tasks");
 taskCmd
   .command("create")
   .description("Create a new task")
-  .requiredOption("-t, --title <title>", "Task title")
-  .option("--type <type>", "Task type (feature, bugfix, refactor, research, test, chore)", "feature")
+  .requiredOption("-d, --description <text>", "Task description")
+  .option("--type <type>", "Task type (feature, bugfix)", "feature")
   .option("--priority <n>", "Priority — lower is higher (default: 100)", "100")
-  .option("-d, --description <text>", "Task description", "")
-  .option("--author <name>", "Author name")
-  .option("--criteria <text>", "Acceptance criterion (repeatable)", collect, [] as string[])
-  .option("--files <path>", "File to focus on (repeatable)", collect, [] as string[])
-  .option("--constraints <text>", "Constraint (repeatable)", collect, [] as string[])
   .action(async (opts) => {
     try {
       const deps = await buildClientDeps();
       const task = await createTask(deps, {
-        title: opts.title,
         type: opts.type as TaskType,
         priority: parseInt(opts.priority, 10),
         description: opts.description,
-        author: opts.author,
-        acceptance_criteria: opts.criteria.length ? opts.criteria : undefined,
-        files: opts.files.length ? opts.files : undefined,
-        constraints: opts.constraints.length ? opts.constraints : undefined,
       });
-      console.log(`Created ${task.id}: ${task.title}`);
+      console.log(`Created ${task.id} (${task.type}, priority ${task.priority})`);
     } catch (err) {
       process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
@@ -141,41 +124,13 @@ taskCmd
     try {
       const deps = await buildClientDeps();
       const tasks = await listTasks(deps.repo, {
-        status: opts.status as TaskStatus | undefined,
+        status: opts.status as any,
       });
       if (opts.json) {
         console.log(JSON.stringify(tasks, null, 2));
       } else {
         console.log(formatTaskTable(tasks));
       }
-    } catch (err) {
-      process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
-      process.exit(1);
-    }
-  });
-
-// --- ralph review ---
-program
-  .command("review <id>")
-  .description("Review a completed task")
-  .option("--approve", "Approve the task (merge + done)")
-  .option("--reject", "Reject the task (re-queue or fail)")
-  .option("--reason <text>", "Rejection reason")
-  .action(async (id: string, opts) => {
-    try {
-      if (opts.approve && opts.reject) {
-        process.stderr.write("Error: --approve and --reject are mutually exclusive\n");
-        process.exit(1);
-      }
-      if (!opts.approve && !opts.reject) {
-        process.stderr.write("Error: must specify --approve or --reject\n");
-        process.exit(1);
-      }
-      const deps = await buildClientDeps();
-      const decision = opts.approve ? "approve" as const : "reject" as const;
-      const task = await reviewTask(deps, id, { decision, reason: opts.reason });
-      const verb = decision === "approve" ? "approved" : "rejected";
-      console.log(`Task ${id}: ${verb} (now ${task.status})`);
     } catch (err) {
       process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);

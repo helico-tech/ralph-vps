@@ -1,76 +1,74 @@
-// Main orchestrator loop — poll, claim, execute, verify, transition
+// Main orchestrator loop — poll, claim, execute, verify, transition, follow-ups
 
 import { join } from "path";
 import type { TaskRepository } from "../ports/task-repository.js";
 import type { SourceControl } from "../ports/source-control.js";
 import type { AgentExecutor } from "../ports/agent-executor.js";
-import type { Verifier } from "../ports/verifier.js";
 import type { Observability } from "../ports/observability.js";
 import type { RalphConfig, Task } from "../core/types.js";
 import { transitionTask } from "../core/state-machine.js";
 import { pickNextTask } from "../core/queue.js";
-import { calculateCosts, canClaimTask } from "../core/budget.js";
 import { buildExecutionPlan } from "../core/prompt-builder.js";
+import { buildNextTasks, resolveBranchName } from "../core/next-task.js";
+import { generateNextId } from "../core/id.js";
 import { isShuttingDown } from "./shutdown.js";
 
 export interface OrchestratorDeps {
   repo: TaskRepository;
   git: SourceControl;
   executor: AgentExecutor;
-  verifier: Verifier;
   obs: Observability;
   config: RalphConfig;
   templatesDir: string;
-  tasksDir: string; // relative to git root, e.g. ".ralph/tasks"
-  systemPromptPath: string; // absolute path to ralph-system.md
+  tasksDir: string;
+  systemPromptPath: string;
   pollIntervalMs?: number;
 }
 
 const SKIP_VERIFY_REASONS = new Set(["refusal", "timeout", "error"]);
 
 export async function processTask(deps: OrchestratorDeps, task: Task): Promise<void> {
-  const { repo, git, executor, verifier, obs, config, templatesDir, tasksDir } = deps;
+  const { repo, git, executor, obs, config, templatesDir, tasksDir } = deps;
   const now = () => new Date().toISOString();
-  const branchName = `${config.git.branch_prefix}${task.id}`;
+  const branchName = resolveBranchName(task, config.git.branch_prefix);
 
   // --- CLAIM ---
-  const claimed = transitionTask(task, "active", now());
+  const claimed = transitionTask(task, "active");
   await repo.transition(claimed, "pending", "active");
   await git.stageFiles([tasksDir]);
   await git.commit(`ralph(${task.id}): claimed`);
 
   const pushed = await git.push();
   if (!pushed) {
-    // Push conflict — another instance claimed, or we're behind. Revert and push.
-    const reverted = transitionTask(claimed, "pending", now());
+    // Claim-revert is an admin operation — bypass state machine
+    const reverted = { ...claimed, status: "pending" as const };
     await repo.transition(reverted, "active", "pending");
     await git.stageFiles([tasksDir]);
     await git.commit(`ralph(${task.id}): claim reverted — push conflict`);
-    try { await git.push(); } catch { /* best effort — next pull will reconcile */ }
+    try { await git.push(); } catch { /* best effort */ }
     return;
   }
 
   obs.emit({ type: "task.claimed", task_id: task.id, timestamp: now() });
 
-  // Everything after claim is wrapped so that any uncaught exception
-  // still transitions the task out of active/ (via failTask).
   try {
     // --- EXECUTE ---
-    // Clean up stale branch from previous attempt
-    try {
-      const branches = await git.listBranches();
-      if (branches.includes(branchName)) {
-        await git.deleteBranch(branchName, { remote: false });
-      }
-    } catch { /* best effort */ }
+    // For feature/bugfix: create new branch. For review/fix: checkout existing branch.
+    if (task.type === "feature" || task.type === "bugfix") {
+      try {
+        const branches = await git.listBranches();
+        if (branches.includes(branchName)) {
+          await git.deleteBranch(branchName, { remote: false });
+        }
+      } catch { /* best effort */ }
+      await git.createBranch(branchName);
+    } else {
+      await git.checkout(branchName);
+    }
 
-    await git.createBranch(branchName);
-
-    const [template, systemPromptTemplate] = await Promise.all([
-      loadTemplate(task.type, templatesDir),
-      Bun.file(deps.systemPromptPath).text(),
-    ]);
-    const plan = buildExecutionPlan(task, template, config, systemPromptTemplate);
+    const template = await loadTemplate(task.type, templatesDir);
+    const systemPrompt = await Bun.file(deps.systemPromptPath).text();
+    const plan = buildExecutionPlan(task, template, config, systemPrompt);
 
     obs.emit({ type: "execution.started", task_id: task.id, timestamp: now(), model: plan.model });
 
@@ -81,7 +79,6 @@ export async function processTask(deps: OrchestratorDeps, task: Task): Promise<v
       task_id: task.id,
       timestamp: now(),
       stop_reason: result.stop_reason,
-      cost_usd: result.cost_usd,
     });
 
     // --- VERIFY ---
@@ -92,97 +89,109 @@ export async function processTask(deps: OrchestratorDeps, task: Task): Promise<v
     }
 
     obs.emit({ type: "verification.started", task_id: task.id, timestamp: now() });
+    const verifyPassed = await runVerify(config.verify, process.cwd());
+    obs.emit({ type: "verification.completed", task_id: task.id, timestamp: now(), passed: verifyPassed });
 
-    const [tests, build, lint] = await Promise.all([
-      verifier.runTests(config.verify.test),
-      verifier.runBuild(config.verify.build),
-      verifier.runLint(config.verify.lint),
-    ]);
-
-    const { exit_criteria } = config;
-    const passed =
-      (!exit_criteria.require_tests || tests.passed || tests.skipped) &&
-      (!exit_criteria.require_build || build.passed || build.skipped) &&
-      (!exit_criteria.require_lint || lint.passed || lint.skipped);
-
-    obs.emit({ type: "verification.completed", task_id: task.id, timestamp: now(), passed });
-
-    // --- TRANSITION ---
-    if (passed) {
-      // Commit agent work on feature branch and push it
+    // --- TRANSITION + FOLLOW-UPS ---
+    if (verifyPassed) {
+      // Commit work on feature branch
       const changed = await git.changedFiles();
+      let commitHash: string | undefined;
       if (changed.length > 0) {
         await git.stageAll();
-        await git.commit(`ralph(${task.id}): work complete`);
+        commitHash = await git.commit(`ralph(${task.id}): work complete`);
+      } else {
+        const last = await git.lastCommit();
+        commitHash = last?.sha;
       }
-      await git.pushBranch(branchName);
 
-      // Switch back to main and move task to review
+      const branchPushed = await git.pushBranch(branchName);
+      if (!branchPushed) {
+        await git.checkout(config.git.main_branch);
+        await failTask(deps, claimed, `failed to push branch ${branchName}`);
+        return;
+      }
       await git.checkout(config.git.main_branch);
 
-      const completed = {
-        ...transitionTask(claimed, "review", now()),
-        cost_usd: result.cost_usd,
-        turns: result.turns,
-        duration_s: result.duration_s,
-        branch: branchName,
-      };
-      await repo.transition(completed, "active", "review");
-      await git.stageFiles([tasksDir]);
-      await git.commit(`ralph(${task.id}): completed — awaiting review`);
-      await git.push();
+      // Complete task with commit hash
+      const completed = { ...transitionTask(claimed, "done"), commit_hash: commitHash };
+      await repo.transition(completed, "active", "done");
 
-      obs.emit({
-        type: "task.completed",
-        task_id: task.id,
-        timestamp: now(),
-        cost_usd: result.cost_usd,
-        turns: result.turns,
-        duration_s: result.duration_s,
-      });
+      obs.emit({ type: "task.completed", task_id: task.id, timestamp: now(), commit_hash: commitHash });
+
+      // Determine follow-ups
+      const allTasks = await repo.listAll();
+      const nextId = generateNextId(allTasks);
+      const { followUps, shouldMerge } = buildNextTasks(completed, true, nextId);
+
+      if (shouldMerge) {
+        await git.merge(branchName);
+        await git.deleteBranch(branchName, { remote: true });
+        obs.emit({ type: "branch.merged", task_id: task.id, branch: branchName, timestamp: now() });
+      }
+
+      for (const followUp of followUps) {
+        await repo.create(followUp);
+        obs.emit({ type: "task.spawned", task_id: followUp.id, parent_id: task.id, timestamp: now(), spawned_type: followUp.type });
+      }
+
+      await git.stageFiles([tasksDir]);
+      await git.commit(`ralph(${task.id}): done${followUps.length ? ` → ${followUps.map((t) => t.id).join(", ")}` : ""}`);
+      await git.push();
     } else {
       await git.checkout(config.git.main_branch);
+
+      // Check if failed task should spawn follow-ups (review fail → fix)
+      const allTasks = await repo.listAll();
+      const nextId = generateNextId(allTasks);
+      const { followUps } = buildNextTasks(task, false, nextId);
+
       await failTask(deps, claimed, "verification failed");
+
+      for (const followUp of followUps) {
+        await repo.create(followUp);
+        obs.emit({ type: "task.spawned", task_id: followUp.id, parent_id: task.id, timestamp: now(), spawned_type: followUp.type });
+      }
+
+      if (followUps.length > 0) {
+        await git.stageFiles([tasksDir]);
+        await git.commit(`ralph(${task.id}): spawned ${followUps.map((t) => t.id).join(", ")}`);
+        await git.push();
+      }
     }
   } catch (err) {
-    // Uncaught exception after claim — ensure task doesn't stay stuck in active/
-    try {
-      await git.checkout(config.git.main_branch);
-    } catch { /* best effort */ }
+    try { await git.checkout(config.git.main_branch); } catch { /* best effort */ }
     await failTask(deps, claimed, err instanceof Error ? err.message : String(err));
   }
 }
 
-async function failTask(
-  deps: OrchestratorDeps,
-  task: Task,
-  reason: string,
-): Promise<void> {
-  const { repo, git, obs, config, tasksDir } = deps;
+async function failTask(deps: OrchestratorDeps, task: Task, reason: string): Promise<void> {
+  const { repo, git, obs, tasksDir } = deps;
   const now = new Date().toISOString();
-  const branchName = `${config.git.branch_prefix}${task.id}`;
+  const updated = transitionTask(task, "failed");
 
-  const canRetry = task.retry_count < task.max_retries;
-  const target = canRetry ? ("pending" as const) : ("failed" as const);
-  const updated = transitionTask(task, target, now);
-
-  await repo.transition(updated, "active", target);
+  await repo.transition(updated, "active", "failed");
   await git.stageFiles([tasksDir]);
-  await git.commit(`ralph(${task.id}): ${canRetry ? "retrying" : "failed"} — ${reason}`);
+  await git.commit(`ralph(${task.id}): failed — ${reason}`);
   await git.push();
 
-  // Clean up stale branch
-  try {
-    const branches = await git.listBranches();
-    if (branches.includes(branchName)) {
-      await git.deleteBranch(branchName, { remote: true });
-    }
-  } catch { /* best effort */ }
+  obs.emit({ type: "task.failed", task_id: task.id, timestamp: now, reason });
+}
 
-  if (canRetry) {
-    obs.emit({ type: "task.retried", task_id: task.id, timestamp: now, attempt: updated.retry_count });
-  } else {
-    obs.emit({ type: "task.failed", task_id: task.id, timestamp: now, reason });
+async function runVerify(command: string, cwd: string): Promise<boolean> {
+  const trimmed = command.trim();
+  if (!trimmed) return true;
+
+  try {
+    const proc = Bun.spawn(["sh", "-c", trimmed], {
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exitCode = await proc.exited;
+    return exitCode === 0;
+  } catch {
+    return false;
   }
 }
 
@@ -198,25 +207,9 @@ export async function runLoop(deps: OrchestratorDeps): Promise<void> {
       await git.pull();
 
       const allTasks = await repo.listAll();
-      const now = new Date().toISOString();
-      const costs = calculateCosts(allTasks, now);
-      const limits = { daily_usd: 0, per_task_usd: config.task_defaults.max_budget_usd };
-
       const next = pickNextTask(allTasks);
 
       if (!next) {
-        await sleep(pollMs);
-        continue;
-      }
-
-      if (!canClaimTask(costs, limits, config.task_defaults.max_budget_usd)) {
-        obs.emit({
-          type: "budget.exceeded",
-          task_id: next.id,
-          timestamp: now,
-          cost_usd: costs.today_usd,
-          limit_usd: config.task_defaults.max_budget_usd,
-        });
         await sleep(pollMs);
         continue;
       }

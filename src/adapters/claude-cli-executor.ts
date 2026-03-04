@@ -9,9 +9,6 @@ interface ClaudeJsonOutput {
   type?: string;
   subtype?: string;
   result?: string;
-  total_cost_usd?: number;
-  num_turns?: number;
-  duration_ms?: number;
   session_id?: string;
   is_error?: boolean;
 }
@@ -19,7 +16,6 @@ interface ClaudeJsonOutput {
 export class ClaudeCliExecutor implements AgentExecutor {
   async execute(plan: ExecutionPlan): Promise<ExecutionResult> {
     const { args, tempFile } = await this.buildArgs(plan);
-    const startMs = Date.now();
 
     let stdout: string;
     let exitCode: number;
@@ -31,7 +27,6 @@ export class ClaudeCliExecutor implements AgentExecutor {
         stderr: "inherit",
       });
 
-      // Read stdout concurrently with process exit to avoid pipe buffer deadlock
       const work = Promise.all([
         new Response(proc.stdout).text(),
         proc.exited,
@@ -44,10 +39,10 @@ export class ClaudeCliExecutor implements AgentExecutor {
             new ExecutionError(
               ERROR_CODES.EXECUTION_TIMEOUT,
               `Claude CLI timed out after ${plan.timeout_ms}ms`,
-              true
-            )
+              true,
+            ),
           );
-        }, plan.timeout_ms)
+        }, plan.timeout_ms),
       );
 
       [stdout, exitCode] = await Promise.race([work, timeout]);
@@ -55,7 +50,7 @@ export class ClaudeCliExecutor implements AgentExecutor {
       if (err instanceof ExecutionError) throw err;
       throw new ExecutionError(
         ERROR_CODES.EXECUTION_FAILED,
-        `Failed to spawn claude: ${(err as Error).message}`
+        `Failed to spawn claude: ${(err as Error).message}`,
       );
     } finally {
       if (tempFile) {
@@ -63,12 +58,11 @@ export class ClaudeCliExecutor implements AgentExecutor {
       }
     }
 
-    // Signal-based kills
     if (exitCode === 124 || exitCode === 137) {
       throw new ExecutionError(
         ERROR_CODES.EXECUTION_TIMEOUT,
         `Claude killed by signal (exit ${exitCode})`,
-        true
+        true,
       );
     }
 
@@ -78,18 +72,14 @@ export class ClaudeCliExecutor implements AgentExecutor {
     } catch {
       throw new ExecutionError(
         ERROR_CODES.INVALID_OUTPUT,
-        `Claude produced non-JSON output (exit ${exitCode}): ${stdout.slice(0, 200)}`
+        `Claude produced non-JSON output (exit ${exitCode}): ${stdout.slice(0, 200)}`,
       );
     }
 
-    const durationMs = Date.now() - startMs;
     const stopReason = this.mapStopReason(exitCode, parsed);
 
     return {
       stop_reason: stopReason,
-      cost_usd: parsed.total_cost_usd ?? 0,
-      turns: parsed.num_turns ?? 0,
-      duration_s: (parsed.duration_ms ?? durationMs) / 1000,
       output: parsed.result ?? "",
     };
   }
@@ -101,10 +91,6 @@ export class ClaudeCliExecutor implements AgentExecutor {
       "--max-turns", String(plan.max_turns),
       "--model", plan.model,
     ];
-
-    if (plan.budget_usd > 0) {
-      args.push("--max-budget-usd", String(plan.budget_usd));
-    }
 
     let tempFile: string | null = null;
     if (plan.system_prompt) {
@@ -120,7 +106,6 @@ export class ClaudeCliExecutor implements AgentExecutor {
     return { args, tempFile };
   }
 
-  // Fix #4: Use output.subtype as authoritative signal instead of heuristic
   private mapStopReason(exitCode: number, output: ClaudeJsonOutput): StopReason {
     if (output.subtype === "max_turns") return "max_turns";
     if (output.is_error) return "error";

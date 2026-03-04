@@ -18,7 +18,7 @@ describe("initProject", () => {
   it("creates all task directories", async () => {
     await initProject(tempDir, { name: "test-project", testCmd: "bun test" });
 
-    const statuses = ["pending", "active", "review", "done", "failed"];
+    const statuses = ["pending", "active", "done", "failed"];
     for (const status of statuses) {
       await access(join(tempDir, ".ralph", "tasks", status));
     }
@@ -29,7 +29,7 @@ describe("initProject", () => {
 
     const config = await Bun.file(join(tempDir, ".ralph", "config.json")).json();
     expect(config.project.name).toBe("my-app");
-    expect(config.verify.test).toBe("npm test");
+    expect(config.verify).toBe("npm test");
     expect(config.git.main_branch).toBe("master");
   });
 
@@ -47,7 +47,6 @@ describe("initProject", () => {
     expect(templates).toContain("default.md");
     expect(templates).toContain("bugfix.md");
     expect(templates).toContain("feature.md");
-    // ralph-system.md should NOT be in templates/ — it goes to .ralph/ root
     expect(templates).not.toContain("ralph-system.md");
   });
 
@@ -61,7 +60,7 @@ describe("initProject", () => {
   it("copies Claude Code skills", async () => {
     await initProject(tempDir, { name: "test", testCmd: "bun test" });
 
-    const skills = ["ralph-task", "ralph-status", "ralph-review", "ralph-list"];
+    const skills = ["ralph-task", "ralph-status", "ralph-list"];
     for (const skill of skills) {
       const path = join(tempDir, ".claude", "skills", skill, "SKILL.md");
       const content = await Bun.file(path).text();

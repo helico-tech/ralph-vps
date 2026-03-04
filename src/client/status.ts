@@ -15,7 +15,6 @@ export async function getStatus(
   const counts: Record<TaskStatus, number> = {
     pending: 0,
     active: 0,
-    review: 0,
     done: 0,
     failed: 0,
   };
@@ -24,8 +23,8 @@ export async function getStatus(
 
   for (const task of tasks) {
     counts[task.status]++;
-    if (task.status === "active" && task.claimed_at) {
-      activeTask = { id: task.id, title: task.title, claimed_at: task.claimed_at };
+    if (task.status === "active") {
+      activeTask = { id: task.id, type: task.type };
     }
   }
 

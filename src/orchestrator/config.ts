@@ -6,18 +6,11 @@ import { ConfigError, ERROR_CODES } from "../core/errors.js";
 const DEFAULTS: RalphConfig = {
   version: 1,
   project: { name: "" },
-  verify: { test: "", build: "", lint: "" },
+  verify: "",
   task_defaults: {
-    max_retries: 2,
     model: "claude-opus-4-5",
     max_turns: 50,
-    max_budget_usd: 5.0,
     timeout_seconds: 1800,
-  },
-  exit_criteria: {
-    require_tests: true,
-    require_build: false,
-    require_lint: false,
   },
   git: { main_branch: "main", branch_prefix: "ralph/" },
   execution: { permission_mode: "skip_all" },
@@ -42,7 +35,7 @@ export async function loadConfig(configPath: string): Promise<RalphConfig> {
     );
   }
 
-  let parsed: unknown;
+  let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(raw);
   } catch {
@@ -56,10 +49,7 @@ export async function loadConfig(configPath: string): Promise<RalphConfig> {
     throw new ConfigError(ERROR_CODES.CONFIG_INVALID, "Config must be a JSON object");
   }
 
-  const config = mergeDefaults(
-    DEFAULTS,
-    parsed as Record<string, unknown>,
-  ) as RalphConfig;
+  const config = mergeDefaults(DEFAULTS, parsed);
 
   // Validate required fields
   if (!config.project?.name) {
@@ -68,22 +58,10 @@ export async function loadConfig(configPath: string): Promise<RalphConfig> {
       "config.project.name is required",
     );
   }
-  if (!config.verify?.test) {
+  if (!config.verify) {
     throw new ConfigError(
       ERROR_CODES.CONFIG_MISSING_FIELD,
-      "config.verify.test is required",
-    );
-  }
-  if (config.task_defaults.max_retries < 0) {
-    throw new ConfigError(
-      ERROR_CODES.CONFIG_INVALID,
-      "config.task_defaults.max_retries must be non-negative",
-    );
-  }
-  if (typeof config.task_defaults.max_budget_usd !== "number" || config.task_defaults.max_budget_usd <= 0) {
-    throw new ConfigError(
-      ERROR_CODES.CONFIG_INVALID,
-      "config.task_defaults.max_budget_usd must be a positive number",
+      "config.verify is required (e.g. 'bun test')",
     );
   }
 
@@ -104,22 +82,21 @@ export async function loadConfig(configPath: string): Promise<RalphConfig> {
 /**
  * Shallow merge per top-level section. File values override defaults.
  */
-function mergeDefaults(
-  defaults: Record<string, unknown>,
-  overrides: Record<string, unknown>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = { ...defaults };
-  for (const key of Object.keys(overrides)) {
-    const d = defaults[key];
-    const o = overrides[key];
-    if (
-      typeof d === "object" && d !== null && !Array.isArray(d) &&
-      typeof o === "object" && o !== null && !Array.isArray(o)
-    ) {
-      result[key] = { ...(d as object), ...(o as object) };
-    } else if (o !== undefined) {
-      result[key] = o;
-    }
-  }
-  return result;
+function mergeSection<T extends Record<string, unknown>>(
+  defaults: T,
+  overrides: Record<string, unknown> | undefined,
+): T {
+  if (!overrides || typeof overrides !== "object") return defaults;
+  return { ...defaults, ...overrides };
+}
+
+function mergeDefaults(defaults: RalphConfig, overrides: Record<string, unknown>): RalphConfig {
+  return {
+    version: (overrides.version as number) ?? defaults.version,
+    project: mergeSection(defaults.project, overrides.project as Record<string, unknown>),
+    verify: (overrides.verify as string) ?? defaults.verify,
+    task_defaults: mergeSection(defaults.task_defaults, overrides.task_defaults as Record<string, unknown>),
+    git: mergeSection(defaults.git, overrides.git as Record<string, unknown>),
+    execution: mergeSection(defaults.execution, overrides.execution as Record<string, unknown>),
+  };
 }

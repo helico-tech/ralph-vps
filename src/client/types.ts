@@ -8,13 +8,13 @@ export interface ClientDeps {
   repo: TaskRepository;
   git: SourceControl;
   config: RalphConfig;
-  tasksDir: string; // relative to git root, e.g. ".ralph/tasks"
+  tasksDir: string;
 }
 
 export interface StatusReport {
   counts: Record<TaskStatus, number>;
   total: number;
-  active_task: { id: string; title: string; claimed_at: string } | null;
+  active_task: { id: string; type: string } | null;
   last_commit: { sha: string; timestamp: string; message: string } | null;
 }
 

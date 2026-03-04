@@ -6,20 +6,15 @@ import { FsTaskRepository } from "../../src/adapters/fs-task-repository.js";
 import { serializeTaskFile } from "../../src/core/task-file.js";
 import type { Task, TaskStatus } from "../../src/core/types.js";
 
-const STATUSES: TaskStatus[] = ["pending", "active", "review", "done", "failed"];
+const STATUSES: TaskStatus[] = ["pending", "active", "done", "failed"];
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: "task-001",
-    title: "Test task",
     status: "pending",
     type: "feature",
     priority: 100,
-    created_at: "2026-03-03T12:00:00Z",
-    author: "Arjan",
     description: "A test task.",
-    max_retries: 2,
-    retry_count: 0,
     ...overrides,
   };
 }
@@ -51,9 +46,9 @@ describe("FsTaskRepository — listAll", () => {
   });
 
   it("returns tasks from all status directories", async () => {
-    await writeTask(makeTask({ id: "t1", status: "pending" }), "pending");
-    await writeTask(makeTask({ id: "t2", status: "active" }), "active");
-    await writeTask(makeTask({ id: "t3", status: "done" }), "done");
+    await writeTask(makeTask({ id: "t1" }), "pending");
+    await writeTask(makeTask({ id: "t2" }), "active");
+    await writeTask(makeTask({ id: "t3" }), "done");
 
     const tasks = await repo.listAll();
     expect(tasks).toHaveLength(3);
@@ -61,8 +56,15 @@ describe("FsTaskRepository — listAll", () => {
     expect(ids).toEqual(["t1", "t2", "t3"]);
   });
 
+  it("sets status from directory, not frontmatter", async () => {
+    await writeTask(makeTask({ id: "t1" }), "active");
+
+    const tasks = await repo.listAll();
+    expect(tasks[0].status).toBe("active");
+  });
+
   it("ignores non-md files", async () => {
-    await writeTask(makeTask({ id: "t1", status: "pending" }), "pending");
+    await writeTask(makeTask({ id: "t1" }), "pending");
     await Bun.write(join(basePath, "pending", ".DS_Store"), "junk");
 
     const tasks = await repo.listAll();
@@ -73,11 +75,12 @@ describe("FsTaskRepository — listAll", () => {
 
 describe("FsTaskRepository — findById", () => {
   it("finds a task by id across status directories", async () => {
-    await writeTask(makeTask({ id: "t1", status: "review" }), "review");
+    await writeTask(makeTask({ id: "t1" }), "done");
 
     const task = await repo.findById("t1");
     expect(task).not.toBeNull();
     expect(task!.id).toBe("t1");
+    expect(task!.status).toBe("done");
   });
 
   it("returns null for nonexistent task", async () => {
@@ -88,54 +91,39 @@ describe("FsTaskRepository — findById", () => {
 
 describe("FsTaskRepository — transition", () => {
   it("moves task file from one status to another", async () => {
-    const task = makeTask({ id: "t1", status: "pending" });
+    const task = makeTask({ id: "t1" });
     await writeTask(task, "pending");
 
-    const updated = { ...task, status: "active" as TaskStatus, claimed_at: "2026-03-03T14:00:00Z" };
+    const updated = { ...task, status: "active" as TaskStatus };
     await repo.transition(updated, "pending", "active");
 
-    // Source should be gone
     const sourceExists = await Bun.file(join(basePath, "pending", "t1.md")).exists();
     expect(sourceExists).toBe(false);
 
-    // Destination should exist with updated content
     const destExists = await Bun.file(join(basePath, "active", "t1.md")).exists();
     expect(destExists).toBe(true);
 
-    // Verify content is the updated task
     const found = await repo.findById("t1");
     expect(found!.status).toBe("active");
   });
 
   it("creates destination directory if it does not exist", async () => {
-    // Remove the "review" directory
-    await rm(join(basePath, "review"), { recursive: true });
+    await rm(join(basePath, "done"), { recursive: true });
 
-    // Task still has status "active" — transition() must enforce to="review"
-    const task = makeTask({ id: "t1", status: "active" });
+    const task = makeTask({ id: "t1" });
     await writeTask(task, "active");
 
-    await repo.transition(task, "active", "review");
+    await repo.transition(task, "active", "done");
     const found = await repo.findById("t1");
     expect(found).not.toBeNull();
-    expect(found!.status).toBe("review");
-  });
-
-  it("enforces destination status in file regardless of task.status", async () => {
-    // Caller passes task with old status — transition must still write correct status
-    const task = makeTask({ id: "t1", status: "pending" });
-    await writeTask(task, "pending");
-
-    await repo.transition(task, "pending", "active");
-    const found = await repo.findById("t1");
-    expect(found!.status).toBe("active");
+    expect(found!.status).toBe("done");
   });
 });
 
 describe("FsTaskRepository — locateAll", () => {
   it("returns tasks paired with their directory status", async () => {
-    await writeTask(makeTask({ id: "t1", status: "pending" }), "pending");
-    await writeTask(makeTask({ id: "t2", status: "active" }), "active");
+    await writeTask(makeTask({ id: "t1" }), "pending");
+    await writeTask(makeTask({ id: "t2" }), "active");
 
     const locations = await repo.locateAll();
     expect(locations).toHaveLength(2);
@@ -152,17 +140,13 @@ describe("FsTaskRepository — roundtrip", () => {
   it("write then read preserves task data", async () => {
     const task = makeTask({
       id: "t1",
-      title: "Roundtrip test",
-      acceptance_criteria: ["Tests pass", "No crashes"],
-      files: ["src/foo.ts"],
-      constraints: ["Do not break things"],
+      description: "Roundtrip test",
     });
     await writeTask(task, "pending");
 
     const found = await repo.findById("t1");
-    expect(found!.title).toBe("Roundtrip test");
-    expect(found!.acceptance_criteria).toEqual(["Tests pass", "No crashes"]);
-    expect(found!.files).toEqual(["src/foo.ts"]);
-    expect(found!.constraints).toEqual(["Do not break things"]);
+    expect(found!.description).toBe("Roundtrip test");
+    expect(found!.type).toBe("feature");
+    expect(found!.priority).toBe(100);
   });
 });
