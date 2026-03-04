@@ -1,6 +1,6 @@
 # Ralph
 
-An autonomous coding agent that picks up tasks from a git-based queue and executes them using Claude Code on a remote VPS. You write tasks, Ralph does the work, you review the results.
+An autonomous coding agent that picks up tasks from a git-based queue and executes them using Claude Code on a remote VPS. You write tasks, Ralph does the work — including reviewing its own output and fixing issues before merging.
 
 ## How It Works
 
@@ -16,14 +16,18 @@ and commit it to        ─────────────►  Ralph polls 
                                         ├─ Claims the task (git mv → active/)
                                         ├─ Creates branch ralph/<task-id>
                                         ├─ Runs Claude Code against it
-                                        ├─ Runs tests/build/lint to verify
-                                        └─ Moves task to review/ or failed/
-                          git fetch
-You review the branch   ◄─────────────  Ralph pushes branch + status
-and the code changes
+                                        ├─ Runs verification command
+                                        ├─ Spawns a review task automatically
+                                        │   ├─ Review passes → auto-merge
+                                        │   └─ Review fails → spawns fix task
+                                        │       └─ Fix done → new review → ...
+                          git fetch     │
+You see merged results ◄─────────────  └─ Pushes branch + merges to main
 ```
 
 **Git is the only communication channel.** No SSH required for normal operations. No databases, no message queues, no external services. Your repo IS the task queue.
+
+Ralph supports **multiple instances** running against the same repo via systemd template units — each picks tasks independently.
 
 ## Concepts
 
@@ -33,27 +37,39 @@ A task is a single Markdown file with YAML frontmatter, living under `.ralph/tas
 
 ```
 .ralph/tasks/
-├── pending/     # Waiting to be picked up (you write here)
+├── pending/     # Waiting to be picked up
 ├── active/      # Currently being worked on by Ralph
-├── review/      # Done, waiting for your review
-├── done/        # Approved and merged
+├── done/        # Completed and merged
 └── failed/      # Ralph couldn't complete it
 ```
 
 Moving a file between directories (`git mv`) is the state transition. No status fields to update, no database rows to flip.
+
+### Task Types
+
+Ralph uses four task types that form an autonomous chain:
+
+| Type | Purpose | Created by |
+|------|---------|------------|
+| `feature` | Adding new functionality | You |
+| `bugfix` | Fixing broken behavior | You |
+| `review` | Review code changes from a parent task | Ralph (auto-spawned) |
+| `fix` | Fix issues found during review | Ralph (auto-spawned) |
+
+When a `feature` or `bugfix` completes successfully, Ralph automatically spawns a `review` task. If the review finds problems, Ralph spawns a `fix` task. When the fix completes, another review is spawned. This continues until the review passes — then Ralph merges the branch. If a fix fails, the chain stops (no infinite loops).
 
 ### Ownership Boundaries
 
 | Who | Writes to |
 |-----|-----------|
 | You | `pending/` |
-| Ralph | `active/`, `review/`, `done/`, `failed/` |
+| Ralph | `pending/` (follow-up tasks), `active/`, `done/`, `failed/` |
 
-You create tasks. Ralph executes them. You never touch `active/`. Ralph never touches `pending/`.
+You create initial tasks. Ralph executes them and spawns follow-up review/fix tasks back into `pending/`.
 
 ### Branches
 
-Ralph creates a branch for every task: `ralph/<task-id>`. All code changes live on this branch. When you approve a task, you merge the branch. This keeps `main` clean and gives you a full diff to review.
+Ralph creates a branch for every root task: `ralph/<task-id>`. All tasks in a chain (the original task plus its review/fix follow-ups) share the same branch. When the final review passes, Ralph merges the branch into `main`.
 
 ## Installation
 
@@ -84,7 +100,7 @@ bun link
 ralph --version
 ```
 
-This gives you the client commands: `ralph task`, `ralph status`, `ralph review`, `ralph doctor`. Your laptop never runs Claude — it just manages the task queue through git.
+This gives you the client commands: `ralph init`, `ralph task`, `ralph status`, `ralph doctor`. Your laptop never runs Claude — it just manages the task queue through git.
 
 ### Install Ralph (on your VPS)
 
@@ -159,7 +175,7 @@ You should see:
 
 #### Option B: Bare metal (systemd)
 
-For when you want Ralph running directly on the VPS without Docker.
+For when you want Ralph running directly on the VPS without Docker. Uses a systemd template unit that supports multiple independent Ralph instances.
 
 **1. Install Bun and Claude Code on the VPS**
 
@@ -170,44 +186,53 @@ curl -fsSL https://bun.sh/install | bash
 # Install Claude Code
 npm install -g @anthropic-ai/claude-code
 
-# Clone and link Ralph
-git clone https://github.com/helico/ralph-vps.git /opt/ralph-vps
-cd /opt/ralph-vps
+# Clone Ralph
+git clone https://github.com/helico/ralph-vps.git /opt/ralph
+cd /opt/ralph
 bun install
-bun link
 ```
 
 **2. Set up environment**
 
+Each project gets its own env file:
+
 ```sh
-# Create a .env file (NOT in the repo — lives on the VPS only)
-cat > /home/ralph/.env << 'EOF'
+# Create env file for your project
+sudo mkdir -p /etc/ralph
+cat > /etc/ralph/my-project.env << 'EOF'
 ANTHROPIC_API_KEY=sk-ant-...
-TASK_REPO_URL=git@github.com:you/your-project.git
 GIT_AUTHOR_NAME=Ralph
 GIT_AUTHOR_EMAIL=ralph@helico.dev
 EOF
 ```
 
-**3. Install the systemd service**
+**3. Clone your project and install the service**
 
 ```sh
 # Clone your project repo
-git clone git@github.com:you/your-project.git /home/ralph/workspace
-cd /home/ralph/workspace
+git clone git@github.com:you/your-project.git /home/ralph/projects/my-project
 
-# Copy the service file
-sudo cp systemd/ralph.service /etc/systemd/system/
+# Copy the template service file
+sudo cp systemd/ralph@.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable ralph
-sudo systemctl start ralph
+
+# Enable and start for your project
+sudo systemctl enable ralph@my-project
+sudo systemctl start ralph@my-project
+```
+
+The `%i` in `ralph@.service` maps to the project name, so you can run multiple instances:
+
+```sh
+sudo systemctl start ralph@project-a
+sudo systemctl start ralph@project-b
 ```
 
 **4. Check status**
 
 ```sh
-sudo systemctl status ralph
-sudo journalctl -u ralph -f
+sudo systemctl status ralph@my-project
+sudo journalctl -u ralph@my-project -f
 ```
 
 ### Install Claude Code Skills (optional)
@@ -228,10 +253,10 @@ Once Ralph is installed on both your laptop and VPS:
 ### 1. Initialize Ralph in your project
 
 ```sh
-ralph init project
+ralph init --name my-app --test "bun test"
 ```
 
-This creates the `.ralph/` directory structure, a default `config.json`, prompt templates, and the system prompt file. Commit and push:
+This creates the `.ralph/` directory structure, a default config, prompt templates, and the system prompt file. Commit and push:
 
 ```sh
 git add .ralph/ templates/
@@ -241,45 +266,37 @@ git push
 
 ### 2. Configure your project
 
-Edit `.ralph/config.json` to match your project's build/test commands:
+The `ralph init` command generates `.ralph/config.json`:
 
 ```json
 {
   "version": 1,
   "project": { "name": "my-app" },
-  "verify": {
-    "test": "bun test",
-    "build": "bun run build",
-    "lint": "bun run lint"
-  },
+  "verify": "bun test",
   "task_defaults": {
-    "max_retries": 2,
-    "model": "opus",
+    "model": "claude-opus-4-5",
     "max_turns": 50,
-    "max_budget_usd": 5.0,
     "timeout_seconds": 1800
-  },
-  "exit_criteria": {
-    "require_tests": true,
-    "require_build": false,
-    "require_lint": false
   },
   "git": {
     "main_branch": "main",
     "branch_prefix": "ralph/"
+  },
+  "execution": {
+    "permission_mode": "skip_all"
   }
 }
 ```
 
-The `verify` commands are what Ralph runs after Claude finishes editing code. If `require_tests` is `true` and `bun test` fails, the task fails (or retries).
+The `verify` command is what Ralph runs after Claude finishes editing code. If it fails, the task fails and Ralph spawns follow-up tasks to address the issue.
 
-Commit and push your config:
+Environment variables can override config values:
 
-```sh
-git add .ralph/config.json
-git commit -m "Configure Ralph for this project"
-git push
-```
+| Variable | Overrides |
+|----------|-----------|
+| `RALPH_MODEL` | `task_defaults.model` |
+| `RALPH_MAIN_BRANCH` | `git.main_branch` |
+| `RALPH_PERMISSION_MODE` | `execution.permission_mode` |
 
 ### 3. Verify everything works
 
@@ -294,10 +311,10 @@ docker logs ralph
 ### 4. Create your first task
 
 ```sh
-ralph task create --title "Add a hello world endpoint at GET /health"
+ralph task create -d "Add a hello world endpoint at GET /health"
 ```
 
-Ralph will pick it up within 30 seconds, execute it, and push the results. Check progress with:
+Ralph will pick it up within 30 seconds, execute it, verify it, spawn a review, and — if the review passes — merge it. Check progress with:
 
 ```sh
 ralph status
@@ -305,10 +322,10 @@ ralph status
 
 ## Creating Tasks
 
-### Minimal task (title only)
+### Minimal task
 
 ```sh
-ralph task create --title "Fix null check in authenticate()"
+ralph task create -d "Fix null check in authenticate()"
 ```
 
 This generates a task file with defaults and commits it to `pending/`:
@@ -316,52 +333,19 @@ This generates a task file with defaults and commits it to `pending/`:
 ```markdown
 ---
 id: task-001
-title: "Fix null check in authenticate()"
-status: pending
 type: feature
 priority: 100
-created_at: "2026-03-03T14:00:00Z"
-author: "Arjan"
-max_retries: 2
 ---
+Fix null check in authenticate()
 ```
 
-### Detailed task (recommended)
+### Detailed task
 
 ```sh
 ralph task create \
-  --title "Fix null check in authenticate()" \
+  -d "Fix null check in authenticate()" \
   --type bugfix \
-  --priority 200 \
-  --files src/auth.ts,test/auth.test.ts \
-  --acceptance-criteria "authenticate() handles null email" \
-  --acceptance-criteria "All existing tests pass" \
-  --acceptance-criteria "New test covers the null email case" \
-  --constraint "Do not modify the User model"
-```
-
-This generates:
-
-```markdown
----
-id: task-002
-title: "Fix null check in authenticate()"
-status: pending
-type: bugfix
-priority: 200
-created_at: "2026-03-03T14:30:00Z"
-author: "Arjan"
-acceptance_criteria:
-  - "authenticate() handles null email"
-  - "All existing tests pass"
-  - "New test covers the null email case"
-files:
-  - src/auth.ts
-  - test/auth.test.ts
-constraints:
-  - "Do not modify the User model"
-max_retries: 2
----
+  --priority 200
 ```
 
 ### Writing task files by hand
@@ -371,60 +355,49 @@ You can also create task files directly. Drop a `.md` file in `.ralph/tasks/pend
 ```markdown
 ---
 id: task-003
-title: "Add rate limiting to /api/login endpoint"
 type: feature
 priority: 150
-acceptance_criteria:
-  - "POST /api/login returns 429 after 5 attempts in 60 seconds"
-  - "Rate limit resets after the window expires"
-  - "Existing auth tests still pass"
-files:
-  - src/routes/auth.ts
-  - src/middleware/rate-limit.ts
-  - test/routes/auth.test.ts
-constraints:
-  - "Use in-memory store, not Redis"
-  - "Do not add new dependencies"
 ---
 ## Description
 
+Add rate limiting to the POST /api/login endpoint.
+
 The login endpoint has no rate limiting. Add a sliding window rate limiter
-as middleware on the POST /api/login route.
+as middleware. Use an in-memory store, not Redis.
 
-## Context
+## Requirements
 
-Security audit flagged this as P1. We want a simple in-memory solution
-for now — Redis-backed rate limiting is a future task.
+- POST /api/login returns 429 after 5 attempts in 60 seconds
+- Rate limit resets after the window expires
+- Existing auth tests still pass
+- Do not add new dependencies
 ```
+
+The Markdown body after the frontmatter IS the description. Put all context, requirements, and constraints there — Ralph reads the full body.
 
 ### Task types
 
-| Type | When to use | Prompt template |
-|------|-------------|-----------------|
-| `bugfix` | Fixing broken behavior | `templates/bugfix.md` |
-| `feature` | Adding new functionality | `templates/feature.md` |
-| `refactor` | Restructuring without behavior change | `templates/default.md` |
-| `test` | Adding or improving tests | `templates/default.md` |
-| `research` | Investigate and document (no code changes) | `templates/default.md` |
-| `chore` | Config, deps, CI, housekeeping | `templates/default.md` |
+| Type | When to use | Created by | Prompt template |
+|------|-------------|------------|-----------------|
+| `feature` | Adding new functionality | You | `templates/feature.md` |
+| `bugfix` | Fixing broken behavior | You | `templates/bugfix.md` |
+| `review` | Reviewing a completed task's code | Ralph | `templates/review.md` |
+| `fix` | Fixing issues found in review | Ralph | `templates/fix.md` |
 
-The type selects which prompt template Ralph uses. V1 ships with `default.md`, `bugfix.md`, and `feature.md`. Unknown types fall back to `default.md`.
+Unknown types fall back to `templates/default.md`.
 
 ### Task fields reference
 
 | Field | Required? | Default | Description |
 |-------|-----------|---------|-------------|
-| `title` | **Yes** (only required field) | -- | What the task is |
 | `id` | System-generated | `task-NNN` | Unique identifier |
-| `status` | System-generated | `pending` | Current state |
 | `type` | No | `feature` | Task type (selects prompt template) |
-| `priority` | No | `100` | Higher = picked first |
-| `created_at` | System-generated | Now | ISO 8601 timestamp |
-| `author` | System-generated | Git user | Who created the task |
-| `acceptance_criteria` | Recommended | *"Change works correctly and tests pass"* | How Ralph knows it's done |
-| `files` | Recommended | -- | Scopes Ralph's attention to these files |
-| `constraints` | No | -- | Things Ralph must NOT do |
-| `max_retries` | No | `2` | How many times to retry on failure |
+| `priority` | No | `100` | Lower number = picked first (Unix nice-style) |
+| `parent_id` | No | -- | Links follow-up tasks to their parent |
+| `commit_hash` | System-set | -- | Set by Ralph on completion |
+| `description` | Yes | -- | The Markdown body of the file |
+
+Status is derived from which directory the file is in — it's not a field in the frontmatter.
 
 ## Checking Status
 
@@ -439,7 +412,6 @@ Queue Status
 ────────────
 pending:  3 tasks
 active:   1 task   (task-002: Fix null check in authenticate)
-review:   2 tasks
 done:     14 tasks
 failed:   1 task
 
@@ -453,62 +425,45 @@ ralph task list
 ```
 
 ```
-ID        Status   Pri  Type     Title
+ID        Status   Pri  Type     Description
 ────────  ───────  ───  ───────  ─────────────────────────────────────
 task-005  pending  200  bugfix   Fix null check in authenticate()
 task-004  pending  150  feature  Add rate limiting to /api/login
-task-003  pending  100  chore    Update dependencies to latest
+task-003  pending  100  feature  Update dependencies to latest
 task-002  active   100  bugfix   Handle timeout in payment webhook
-task-001  review   100  feature  Add user profile page
+task-001  done     100  feature  Add user profile page
 ```
 
 ### Filter by status
 
 ```sh
-ralph task list --status review
+ralph task list --status pending
 ralph task list --status failed
+ralph task list --json
 ```
 
-## Reviewing Completed Tasks
+## The Autonomous Cycle
 
-When Ralph finishes a task, it moves the file to `review/` and pushes the code to a `ralph/<task-id>` branch. You review it like any other branch:
-
-### 1. See what's ready for review
-
-```sh
-ralph task list --status review
-```
+Ralph doesn't need you to review code. It reviews its own work:
 
 ```
-ID        Status  Pri  Type     Title
-────────  ──────  ───  ───────  ──────────────────────────────
-task-001  review  100  feature  Add user profile page
-task-006  review  200  bugfix   Fix race condition in cache
+feature/bugfix completes
+  └─ verify passes → task moves to done/
+      └─ Ralph spawns a review task → pending/
+          └─ Review passes → Ralph merges the branch ✓
+          └─ Review fails → Ralph spawns a fix task → pending/
+              └─ Fix completes → verify passes → done/
+                  └─ Ralph spawns another review → pending/
+                      └─ Review passes → merge ✓
+                      └─ Review fails → spawn fix → ...
+                          └─ Fix fails → chain stops ✗
 ```
 
-### 2. Look at the diff
-
-```sh
-git diff main...ralph/task-001
-```
-
-Or use your normal code review tools — it's just a branch.
-
-### 3. Approve or reject
-
-**Approve** — merges the branch into main, moves task to `done/`:
-
-```sh
-ralph review task-001 --approve
-```
-
-**Reject** — moves task back to `pending/` for another attempt, deletes the branch:
-
-```sh
-ralph review task-001 --reject --reason "Missing error handling for network timeout"
-```
-
-The rejection reason is appended to the task file, so Ralph has context on the next attempt.
+**Key rules:**
+- All tasks in a chain share one branch: `ralph/<root-task-id>`
+- Follow-up tasks link to their parent via `parent_id`
+- A fix failure is a dead end — the chain stops, preventing infinite loops
+- Successful reviews trigger an automatic merge to `main`
 
 ## What Ralph Does With Your Task
 
@@ -516,31 +471,24 @@ When Ralph picks up a task, here's the full cycle:
 
 1. **Pull** — fetches latest `main`, fast-forward merge
 2. **Claim** — `git mv pending/task.md active/task.md`, commit, push
-3. **Branch** — creates `ralph/<task-id>` from `main`
-4. **Build prompt** — reads task file, selects template by type, interpolates acceptance criteria / files / constraints into the prompt
-5. **Execute** — runs Claude Code with the built prompt, budget limits, and turn limits
-6. **Verify** — runs your configured test/build/lint commands
-7. **Transition** — if verified: push branch, move to `review/`. If failed + retries left: move back to `pending/`. If permanently failed: move to `failed/`.
+3. **Branch** — creates or checks out `ralph/<task-id>` from `main`
+4. **Build prompt** — reads task file, selects template by type, interpolates variables into the prompt
+5. **Execute** — runs Claude Code with the built prompt, model, turn limits, and permission mode
+6. **Verify** — runs your configured verify command
+7. **Transition** — if verified: push branch, move to `done/`, spawn follow-up tasks, merge if review passed. If failed: move to `failed/`, spawn follow-ups.
 
 Every state transition is a git commit. The git log IS the audit trail:
 
 ```
 ralph(task-002): claimed
-ralph(task-002): verified — tests pass
-ralph(task-002): moved to review
+ralph(task-002): work complete
+ralph(task-002): done
+ralph(task-003): spawned (review of task-002)
 ```
 
-### After completion
+### Crash recovery
 
-Ralph adds execution metadata to the task frontmatter:
-
-```yaml
-cost_usd: 1.23
-turns: 12
-duration_s: 145
-attempt: 1
-branch: ralph/task-002
-```
+If Ralph dies mid-task, it reclaims orphaned `active/` tasks on restart. Any task found in `active/` is moved back to `pending/` and its stale branch is cleaned up.
 
 ## Health Check
 
@@ -553,19 +501,17 @@ Verifies that your project is correctly configured:
 ```
 Ralph Doctor
 ────────────
-[OK]  .ralph/config.json exists and is valid
-[OK]  .ralph/tasks/ directories exist (pending, active, review, done, failed)
-[OK]  .ralph/ralph-system.md exists
-[OK]  templates/ directory exists with default.md
-[OK]  Git remote is configured
-[OK]  verify.test command works: bun test
-[WARN] verify.build not configured (set exit_criteria.require_build to enable)
-[OK]  6 checks passed, 1 warning
+[OK]  Git repository detected
+[OK]  Configuration is valid
+[OK]  Task directories exist (pending, active, done, failed)
+[OK]  Claude CLI is available
+────────────
+4 checks passed
 ```
 
 ## Environment Variables
 
-These are set on the VPS only (via `.env` or `docker run -e`). Never committed to git.
+These are set on the VPS only (via `.env`, `docker run -e`, or `/etc/ralph/<project>.env`). Never committed to git.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
@@ -573,41 +519,50 @@ These are set on the VPS only (via `.env` or `docker run -e`). Never committed t
 | `TASK_REPO_URL` | Yes | -- | Git remote URL (SSH recommended) |
 | `GIT_AUTHOR_NAME` | No | `Ralph` | Git author for Ralph's commits |
 | `GIT_AUTHOR_EMAIL` | No | `ralph@helico.dev` | Git email for Ralph's commits |
+| `RALPH_MODEL` | No | `claude-opus-4-5` | Override model for Claude |
+| `RALPH_MAIN_BRANCH` | No | `main` | Override main branch |
+| `RALPH_PERMISSION_MODE` | No | `skip_all` | Override Claude permission mode |
 
 ## Prompt Templates
 
-Ralph uses prompt templates to give Claude task-specific instructions. Templates live in `templates/` at the project root and are loaded at runtime (hot-reloadable — edit them while Ralph is running).
+Ralph uses prompt templates to give Claude task-specific instructions. Templates live in `templates/` at the project root.
 
-V1 ships with three:
+Five templates ship with Ralph:
 
-- `templates/default.md` — generic task execution
-- `templates/bugfix.md` — bug-focused: reproduce, fix, regression test
-- `templates/feature.md` — feature-focused: implement, test, document
+- `templates/feature.md` — implement new functionality
+- `templates/bugfix.md` — reproduce, fix, regression test
+- `templates/review.md` — review code changes from a parent task
+- `templates/fix.md` — fix issues found during review
+- `templates/default.md` — generic fallback for unknown types
 
-Templates use variable interpolation from the task frontmatter:
+Templates use `{{variable}}` interpolation:
 
 ```markdown
-## Task: {{title}}
+## Task: {{id}}
+
+Type: {{type}} | Priority: {{priority}}
 
 {{description}}
-
-### Files to focus on
-{{#files}}
-- {{.}}
-{{/files}}
-
-### Acceptance Criteria
-{{#acceptance_criteria}}
-- {{.}}
-{{/acceptance_criteria}}
-
-### Constraints
-{{#constraints}}
-- {{.}}
-{{/constraints}}
 ```
 
-The system prompt (`ralph-system.md`) provides behavioral rules that apply to ALL tasks — commit discipline, scope boundaries, what to do when stuck. It's separate from your project's `CLAUDE.md`, which contains project conventions (build commands, naming, architecture).
+Available template variables:
+
+| Variable | Source |
+|----------|--------|
+| `{{id}}` | Task ID |
+| `{{type}}` | Task type |
+| `{{description}}` | Task body (Markdown) |
+| `{{priority}}` | Priority number |
+| `{{parent_id}}` | Parent task ID (empty if none) |
+
+The system prompt (`templates/ralph-system.md`) uses its own variables:
+
+| Variable | Source |
+|----------|--------|
+| `{{project_name}}` | From `config.project.name` |
+| `{{verify_command}}` | From `config.verify` |
+
+The system prompt provides behavioral rules that apply to ALL tasks — autonomy, git discipline, scope boundaries, verification requirements, and what to do when stuck. It's separate from your project's `CLAUDE.md`, which contains project conventions.
 
 ## Project Structure
 
@@ -617,19 +572,18 @@ your-project/
 ├── test/                       # Your tests
 ├── .ralph/
 │   ├── config.json             # Ralph configuration (committed)
-│   ├── ralph-system.md         # System prompt for Claude (committed)
-│   ├── tasks/
-│   │   ├── pending/            # Tasks waiting to be picked up
-│   │   ├── active/             # Currently being executed
-│   │   ├── review/             # Done, waiting for human review
-│   │   ├── done/               # Approved and merged
-│   │   └── failed/             # Could not be completed
-│   ├── heartbeat.json          # Node health (gitignored, disk only)
-│   └── traces/                 # Execution traces (gitignored, disk only)
+│   └── tasks/
+│       ├── pending/            # Tasks waiting to be picked up
+│       ├── active/             # Currently being executed
+│       ├── done/               # Completed and merged
+│       └── failed/             # Could not be completed
 ├── templates/
-│   ├── default.md              # Generic task template
-│   ├── bugfix.md               # Bug fix template
-│   └── feature.md              # Feature template
+│   ├── ralph-system.md         # System prompt for Claude
+│   ├── feature.md              # Feature task template
+│   ├── bugfix.md               # Bugfix task template
+│   ├── review.md               # Review task template
+│   ├── fix.md                  # Fix task template
+│   └── default.md              # Generic fallback template
 ├── CLAUDE.md                   # Project conventions (for Claude Code)
 └── ...
 ```
@@ -637,9 +591,10 @@ your-project/
 ## Design Principles
 
 - **Git is the only state store.** No databases, no message queues. If it's not in git, it doesn't exist.
-- **No auto-accept.** Every task goes through human review. Ralph proposes, you decide.
+- **Autonomous self-review.** Ralph reviews its own work, fixes issues, and merges — no human bottleneck.
+- **Bounded autonomy.** Fix failures stop the chain. No infinite loops, no runaway costs.
 - **Explicit file staging.** Ralph never runs `git add -A`. Every staged file is intentional.
-- **Single worker.** One task at a time. No multi-worker complexity until single-worker is proven.
+- **Multi-instance support.** Run multiple Ralph instances against the same repo via systemd templates.
 - **Per-task branches.** Code changes live on `ralph/<task-id>`, keeping `main` clean.
 - **Crash recovery.** If Ralph dies mid-task, it reclaims orphaned `active/` tasks on restart.
 - **Docker is the sandbox.** The container IS the security boundary. Claude can't escape it.
