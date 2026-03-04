@@ -1,5 +1,5 @@
 [Unit]
-Description=Ralph — Autonomous coding agent
+Description=Ralph — Autonomous coding agent (%i)
 After=network-online.target
 Wants=network-online.target
 
@@ -9,11 +9,11 @@ User=ralph
 Group=ralph
 
 # Working directory is the target project repo
-WorkingDirectory=/home/ralph/project
+WorkingDirectory=/home/ralph/projects/%i
 ExecStart=/usr/local/bin/bun run /opt/ralph/src/cli.ts start
 
-# Environment
-EnvironmentFile=/etc/ralph/env
+# Per-instance environment
+EnvironmentFile=/etc/ralph/%i.env
 
 # Restart on failure with 10s delay
 Restart=on-failure
@@ -26,13 +26,13 @@ TimeoutStopSec=120
 # Logging to journald
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=ralph
+SyslogIdentifier=ralph-%i
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/ralph/project /home/ralph/.ssh /home/ralph/.config
+ReadWritePaths=/home/ralph/projects/%i /home/ralph/.ssh /home/ralph/.config
 
 [Install]
 WantedBy=multi-user.target

@@ -103,23 +103,30 @@ sudo chown -R ralph:ralph /opt/ralph
 sudo -u ralph bun install --production --cwd /opt/ralph
 ```
 
-### 4. Clone target project
+### 4. Clone target project(s)
+
+Each project gets its own directory under `/home/ralph/projects/`:
 
 ```bash
-sudo -u ralph git clone git@github.com:your-org/your-project.git /home/ralph/project
+sudo mkdir -p /home/ralph/projects
+sudo -u ralph git clone git@github.com:your-org/my-api.git /home/ralph/projects/my-api
+# Add more projects as needed:
+# sudo -u ralph git clone git@github.com:your-org/my-app.git /home/ralph/projects/my-app
 ```
 
-### 5. Configure environment
+### 5. Configure environment (per project)
+
+Each project gets its own env file at `/etc/ralph/<project>.env`:
 
 ```bash
 sudo mkdir -p /etc/ralph
-sudo tee /etc/ralph/env << 'EOF'
+sudo tee /etc/ralph/my-api.env << 'EOF'
 ANTHROPIC_API_KEY=sk-ant-...
 # RALPH_MODEL=claude-opus-4-5
 # RALPH_MAIN_BRANCH=main
 # RALPH_PERMISSION_MODE=skip_all
 EOF
-sudo chmod 600 /etc/ralph/env
+sudo chmod 600 /etc/ralph/my-api.env
 ```
 
 ### 6. Configure git for ralph user
@@ -131,24 +138,36 @@ sudo -u ralph git config --global user.email "ralph@helico.dev"
 
 ### 7. Install and start service
 
+The service file is a systemd template (`ralph@.service`). The part after `@` is the
+project directory name under `/home/ralph/projects/`.
+
 ```bash
-sudo cp /opt/ralph/systemd/ralph.service /etc/systemd/system/
+sudo cp /opt/ralph/systemd/ralph@.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable ralph
-sudo systemctl start ralph
+
+# Enable and start per project:
+sudo systemctl enable ralph@my-api
+sudo systemctl start ralph@my-api
+
+# Multiple projects? Just add more instances:
+# sudo systemctl enable ralph@my-app
+# sudo systemctl start ralph@my-app
 ```
 
 ### 8. Verify
 
 ```bash
-# Check service status
-sudo systemctl status ralph
+# Check a specific instance
+sudo systemctl status ralph@my-api
 
-# Follow logs
-sudo journalctl -u ralph -f
+# Follow logs for one instance
+sudo journalctl -u ralph@my-api -f
+
+# Follow logs for ALL Ralph instances
+sudo journalctl -u 'ralph@*' -f
 
 # Run doctor
-sudo -u ralph bash -c 'cd /home/ralph/project && bun run /opt/ralph/src/cli.ts doctor'
+sudo -u ralph bash -c 'cd /home/ralph/projects/my-api && bun run /opt/ralph/src/cli.ts doctor'
 ```
 
 ## Environment Variables
@@ -168,8 +187,11 @@ sudo -u ralph bash -c 'cd /home/ralph/project && bun run /opt/ralph/src/cli.ts d
 # Docker
 docker compose logs -f
 
-# systemd
-sudo journalctl -u ralph -f
+# systemd — single instance
+sudo journalctl -u ralph@my-api -f
+
+# systemd — all instances
+sudo journalctl -u 'ralph@*' -f
 ```
 
 ### Restart
@@ -179,7 +201,7 @@ sudo journalctl -u ralph -f
 docker compose restart
 
 # systemd
-sudo systemctl restart ralph
+sudo systemctl restart ralph@my-api
 ```
 
 ### Stop
@@ -189,7 +211,7 @@ sudo systemctl restart ralph
 docker compose stop
 
 # systemd
-sudo systemctl stop ralph
+sudo systemctl stop ralph@my-api
 ```
 
 ### Update Ralph
@@ -202,6 +224,6 @@ bun install --production
 # Docker
 cd docker && docker compose up -d --build
 
-# systemd
-sudo systemctl restart ralph
+# systemd — restart all instances
+sudo systemctl restart 'ralph@*'
 ```
